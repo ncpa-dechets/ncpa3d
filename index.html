@@ -165,6 +165,7 @@
     <p id="etat-batiments">Bâtiments : chargement…</p>
     <p id="etat-relief">Relief : en attente</p>
     <p>Cliquez sur un bâtiment pour afficher ses informations.</p>
+    <p>Clic droit : contrôle de l’altitude du sol sous le curseur.</p>
   </div>
 </aside>
 
@@ -199,25 +200,43 @@
   };
 
   // ---------- Relief IGN (RGE ALTI, altitudes NGF, comme les bâtiments) ----------
+  // Dalles BIL 32 bits little-endian (vérifié face à l'API altimétrique IGN), nodata = -99999 (mer).
+  // Une dalle en échec ou aberrante est REJETÉE : Cesium la reconstruit alors à partir de la dalle
+  // parente au lieu d'afficher un sol plat à 0 m (qui faisait flotter les bâtiments).
   const N = 65, grille = new Cesium.GeographicTilingScheme();
-  let reliefOk = 0, reliefKo = 0;
+  const NIVEAU_MIN = 7;                    // en dessous, sol plat (échelle continentale)
+  const ALT_MIN = -10, ALT_MAX = 400;      // plage plausible sur NCPA (m NGF)
+  const NODATA = -9999;                    // toute valeur inférieure = pas de donnée (mer)
+  // Sur le littoral, le WMS rééchantillonne en mélangeant -99999 et la terre : valeurs
+  // parasites de -10 à -9999 m. Sous ALT_MIN, on considère donc qu'il s'agit de la mer.
+  const MAX_REQUETES = 4, ESSAIS = 3;      // ménage le service IGN (erreurs 429)
+  let reliefOk = 0, reliefRejet = 0, reliefKo = 0, enCours = 0, pauseJusqua = 0;
   const majEtatRelief = () => {
     const el = document.getElementById("etat-relief");
-    if (reliefOk === 0 && reliefKo > 0) {
-      el.textContent = "Relief : service IGN indisponible, sol plat affiché";
-      el.className = "erreur";
-    } else if (reliefOk > 0) {
-      el.textContent = `Relief : ${reliefOk} dalles chargées` + (reliefKo ? ` (${reliefKo} en échec)` : "");
-      el.className = "";
+    const details = [reliefRejet && `${reliefRejet} rejetées`, reliefKo && `${reliefKo} en échec`].filter(Boolean).join(", ");
+    el.textContent = `Relief : ${reliefOk} dalles chargées` + (details ? ` (${details})` : "");
+    el.className = reliefOk === 0 && (reliefRejet || reliefKo) ? "erreur" : "";
+  };
+  const attendre = ms => new Promise(r => setTimeout(r, ms));
+  const telechargerDalle = async (url) => {
+    for (let essai = 1; ; essai++) {
+      const rep = await fetch(url).catch(() => null);
+      if (rep && rep.ok) return rep.arrayBuffer();
+      if (essai >= ESSAIS) throw new Error(rep ? `HTTP ${rep.status}` : "réseau");
+      const delai = (Number(rep && rep.headers.get("Retry-After")) * 1000) || 800 * 2 ** essai + Math.random() * 400;
+      if (rep && rep.status === 429) pauseJusqua = Math.max(pauseJusqua, Date.now() + delai);
+      await attendre(delai);
     }
   };
   const reliefIGN = new Cesium.CustomHeightmapTerrainProvider({
     width: N, height: N, tilingScheme: grille,
     callback: function (x, y, niveau) {
       const plat = new Float32Array(N * N);
-      if (niveau < 8) return plat;
+      if (niveau < NIVEAU_MIN) return plat;
       const r = grille.tileXYToRectangle(x, y, niveau);
       if (!Cesium.Rectangle.intersection(r, EMPRISE)) return plat;
+      // undefined = « réessaie plus tard » pour Cesium : limite le nombre de requêtes simultanées
+      if (enCours >= MAX_REQUETES || Date.now() < pauseJusqua) return undefined;
       const deg = Cesium.Math.toDegrees;
       // élargit d'un demi-pixel pour que les points tombent pile sur les bords de dalle
       const dx = (r.east - r.west) / (N - 1) / 2, dy = (r.north - r.south) / (N - 1) / 2;
@@ -225,17 +244,25 @@
       const url = "https://data.geopf.fr/wms-r/wms?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap" +
         "&LAYERS=ELEVATION.ELEVATIONGRIDCOVERAGE.HIGHRES&STYLES=&CRS=EPSG:4326" +
         `&BBOX=${bbox}&WIDTH=${N}&HEIGHT=${N}&FORMAT=image/x-bil;bits=32`;
-      return fetch(url)
-        .then(rep => { if (!rep.ok) throw new Error(rep.status); return rep.arrayBuffer(); })
+      enCours++;
+      return telechargerDalle(url)
+        .catch(e => { reliefKo++; majEtatRelief(); throw e; })
         .then(buf => {
-          const h = new Float32Array(buf);
-          if (h.length !== N * N) throw new Error("taille inattendue");
-          for (let i = 0; i < h.length; i++) if (!(h[i] > -100 && h[i] < 2000)) h[i] = 0; // mer / pas de donnée
+          if (buf.byteLength !== N * N * 4) { reliefRejet++; majEtatRelief(); throw new Error("taille inattendue"); }
+          const dv = new DataView(buf), h = new Float32Array(N * N);
+          for (let i = 0; i < h.length; i++) {
+            const v = dv.getFloat32(i * 4, true);
+            if (v < ALT_MIN) { h[i] = 0; continue; }       // mer ou mélange avec nodata : niveau 0 NGF
+            if (!(v <= ALT_MAX)) { reliefRejet++; majEtatRelief(); throw new Error(`valeur aberrante ${v}`); }
+            h[i] = v;
+          }
           reliefOk++; majEtatRelief(); return h;
         })
-        .catch(() => { reliefKo++; majEtatRelief(); return plat; });
+        .finally(() => { enCours--; });
     }
   });
+  // évite d'inonder la console : l'échec est déjà compté dans l'indicateur
+  reliefIGN.errorEvent.addEventListener(() => {});
   const solPlat = new Cesium.EllipsoidTerrainProvider();
 
   // ---------- Visionneuse ----------
@@ -384,6 +411,69 @@
     document.getElementById("fiche-titre").textContent = titre;
     fiche.hidden = false;
   }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+
+  // ---------- Contrôle altimétrique (clic droit) ----------
+  // sampleTerrainMostDetailed est inutilisable ici : le relief personnalisé n'expose pas de
+  // disponibilité de dalles. On compare donc le sol AFFICHÉ (globe.getHeight) à la référence
+  // IGN (API altimétrique, RGE ALTI, sans clé) et à l'altitude de base du bâtiment cliqué.
+  const m = v => (v === null || v === undefined || isNaN(v)) ? "—" : `${v.toFixed(2)} m`;
+  const ecart = (a, b) => (a == null || b == null || isNaN(a) || isNaN(b)) ? "—" : `${a - b > 0 ? "+" : ""}${(a - b).toFixed(2)} m`;
+  const altitudeBase = f => {
+    const ids = f.getPropertyIds();
+    const id = ids.find(i => /^altitude_minimale_sol$/i.test(i)) || ids.find(i => /alti.*sol|sol.*alti|z_?min/i.test(i));
+    const v = id ? Number(f.getProperty(id)) : NaN;
+    return isFinite(v) && Math.abs(v) < 1e6 ? { id, v } : null;
+  };
+  const afficherControle = (lignes, titre) => {
+    fermerFiche();
+    corps.innerHTML = "";
+    for (const [nom, val] of lignes) {
+      const tr = document.createElement("tr");
+      const a = document.createElement("td"); a.textContent = nom;
+      const b = document.createElement("td"); b.textContent = val;
+      tr.append(a, b); corps.append(tr);
+    }
+    document.getElementById("fiche-titre").textContent = titre;
+    fiche.hidden = false;
+  };
+  let numControle = 0;
+  handler.setInputAction(async clic => {
+    const num = ++numControle;
+    const sol = scene.globe.pick(viewer.camera.getPickRay(clic.position), scene);
+    if (!sol) { afficherControle([["Position", "hors du sol"]], "Contrôle altimétrique"); return; }
+    const c = Cesium.Cartographic.fromCartesian(sol);
+    const lon = Cesium.Math.toDegrees(c.longitude), lat = Cesium.Math.toDegrees(c.latitude);
+    const solAffiche = scene.globe.getHeight(c);
+    const f = scene.pick(clic.position), base = estBatiment(f) ? altitudeBase(f) : null;
+    const decalage = Number(curseurH.value);
+    const lignes = (ign) => {
+      const l = [
+        ["Position", `${lat.toFixed(5)}, ${lon.toFixed(5)}`],
+        ["Sol affiché (relief chargé)", m(solAffiche)],
+        ["Sol IGN (API altimétrique)", ign === undefined ? "interrogation…" : m(ign)],
+        ["Écart affiché − IGN", ign === undefined ? "…" : ecart(solAffiche, ign)]
+      ];
+      if (estBatiment(f)) {
+        if (!base) l.push(["Bâtiment", "pas d’attribut d’altitude du sol"]);
+        else {
+          const baseAff = base.v + decalage;
+          l.push([`Base du bâtiment (${base.id}${decalage ? ` ${decalage > 0 ? "+" : ""}${decalage} m` : ""})`, m(baseAff)]);
+          l.push(["Écart base − sol affiché", ecart(baseAff, solAffiche)]);
+          l.push(["Écart base − sol IGN", ign === undefined ? "…" : ecart(baseAff, ign)]);
+        }
+      }
+      return l;
+    };
+    afficherControle(lignes(undefined), "Contrôle altimétrique");
+    let ign = null;
+    try {
+      const rep = await fetch("https://data.geopf.fr/altimetrie/1.0/calcul/alti/rest/elevation.json" +
+        `?lon=${lon.toFixed(6)}&lat=${lat.toFixed(6)}&resource=ign_rge_alti_wld&zonly=true`);
+      const z = (await rep.json()).elevations[0];
+      ign = z > NODATA ? z : null;
+    } catch (_) { ign = null; }
+    if (num === numControle) afficherControle(lignes(ign), "Contrôle altimétrique");
+  }, Cesium.ScreenSpaceEventType.RIGHT_CLICK);
 })();
 </script>
 </body>
