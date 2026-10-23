@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Bâtiments 3D de NCPA</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+<link href="https://cesium.com/downloads/cesiumjs/releases/1.120/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+<script src="https://cesium.com/downloads/cesiumjs/releases/1.120/Build/Cesium/Cesium.js"></script>
+<style>
+  :root {
+    color-scheme: light;
+    --panneau: rgba(238, 241, 242, 0.94);
+    --texte: #24323B;
+    --texte-doux: #5A6A74;
+    --trait: #C9D1D5;
+    --accent: #4E7F45;          /* vert bocage */
+    --accent-texte: #FFFFFF;
+    --survol: #E9A93B;          /* ambre */
+    --pierre: #E3D6BC;          /* pierre de Caen */
+    --fond-bouton: #FFFFFF;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --panneau: rgba(30, 42, 51, 0.94);
+      --texte: #EEF1F2;
+      --texte-doux: #A9B6BD;
+      --trait: #3D505C;
+      --accent: #7FB173;
+      --accent-texte: #14201A;
+      --fond-bouton: #2A3A45;
+    }
+  }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: "Public Sans", "Segoe UI", system-ui, sans-serif;
+    font-size: 14px; line-height: 1.45; color: var(--texte); background: #24323B;
+  }
+  #carte { position: absolute; inset: 0; }
+
+  .panneau {
+    position: absolute; z-index: 5;
+    top: calc(12px + env(safe-area-inset-top, 0px)); left: 12px;
+    width: 290px; max-width: calc(100% - 24px); box-sizing: border-box;
+    background: var(--panneau); backdrop-filter: blur(6px);
+    border-left: 4px solid var(--accent); border-radius: 4px;
+    padding: 14px 16px 12px; box-shadow: 0 6px 24px rgba(20, 30, 36, 0.28);
+  }
+  .panneau h1 { font-size: 18px; line-height: 1.2; margin: 0 0 2px; font-weight: 700; }
+  .panneau .sous-titre { color: var(--texte-doux); margin: 0 0 12px; font-size: 13px; }
+  .ligne { margin: 0 0 12px; }
+  .ligne > .nom { display: block; font-weight: 600; margin-bottom: 5px; }
+  .ligne .aide { color: var(--texte-doux); font-size: 12.5px; margin-top: 3px; }
+
+  .bascule { display: flex; border: 1px solid var(--trait); border-radius: 4px; overflow: hidden; }
+  .bascule button {
+    flex: 1; font: inherit; padding: 6px 8px; border: 0; cursor: pointer;
+    background: var(--fond-bouton); color: var(--texte);
+  }
+  .bascule button + button { border-left: 1px solid var(--trait); }
+  .bascule button[aria-pressed="true"] { background: var(--accent); color: var(--accent-texte); font-weight: 600; }
+
+  label.case { display: flex; gap: 8px; align-items: center; cursor: pointer; font-weight: 600; }
+  input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px; margin: 0; }
+  input[type="range"] { width: 100%; accent-color: var(--accent); margin: 2px 0 0; }
+  .valeur { float: right; font-weight: 400; color: var(--texte-doux); font-variant-numeric: tabular-nums; }
+
+  .action {
+    width: 100%; font: inherit; font-weight: 600; padding: 8px; cursor: pointer;
+    border: 1px solid var(--accent); border-radius: 4px; background: transparent; color: var(--texte);
+  }
+  .action:hover { background: var(--accent); color: var(--accent-texte); }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--survol); outline-offset: 2px; }
+
+  .etat { border-top: 1px solid var(--trait); padding-top: 9px; margin-top: 4px; font-size: 12.5px; color: var(--texte-doux); }
+  .etat p { margin: 0 0 2px; }
+  .etat .erreur { color: #C2412D; }
+
+  #replier {
+    position: absolute; top: 10px; right: 10px; border: 0; background: transparent;
+    color: var(--texte-doux); font: inherit; font-size: 18px; cursor: pointer; line-height: 1; padding: 2px 6px;
+  }
+  .panneau.replie > :not(h1):not(#replier) { display: none; }
+  .panneau.replie h1 { margin: 0; }
+
+  #fiche {
+    position: absolute; z-index: 5; right: 12px;
+    bottom: calc(36px + env(safe-area-inset-bottom, 0px));
+    width: 330px; max-width: calc(100% - 24px); max-height: 55vh; overflow: auto; box-sizing: border-box;
+    background: var(--panneau); backdrop-filter: blur(6px);
+    border-top: 4px solid var(--survol); border-radius: 4px;
+    padding: 12px 14px; box-shadow: 0 6px 24px rgba(20, 30, 36, 0.28);
+  }
+  #fiche[hidden] { display: none; }
+  #fiche h2 { font-size: 15px; margin: 0 26px 8px 0; word-break: break-all; }
+  #fiche table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  #fiche td { padding: 3px 0; border-bottom: 1px solid var(--trait); vertical-align: top; }
+  #fiche td:first-child { color: var(--texte-doux); padding-right: 10px; word-break: break-word; }
+  #fiche td:last-child { text-align: right; font-variant-numeric: tabular-nums; word-break: break-all; }
+  #fermer-fiche {
+    position: absolute; top: 8px; right: 8px; border: 0; background: transparent;
+    color: var(--texte-doux); font-size: 18px; cursor: pointer; line-height: 1;
+  }
+
+  .cesium-viewer-bottom { opacity: 0.8; }
+  @media (max-width: 600px) {
+    .panneau { width: auto; right: 12px; }
+    #fiche { left: 12px; right: 12px; width: auto; max-height: 40vh; }
+  }
+</style>
+</head>
+<body>
+<div id="carte"></div>
+
+<aside class="panneau" id="panneau" aria-label="Réglages de la carte">
+  <h1>Bâtiments 3D de NCPA</h1>
+  <button id="replier" aria-expanded="true" aria-label="Replier le panneau" title="Replier">–</button>
+  <p class="sous-titre">Toitures reconstruites à partir du LiDAR HD et de la BD TOPO (IGN)</p>
+
+  <div class="ligne">
+    <span class="nom">Fond de carte</span>
+    <div class="bascule" role="group" aria-label="Fond de carte">
+      <button type="button" data-fond="ortho" aria-pressed="true">Photo aérienne</button>
+      <button type="button" data-fond="plan" aria-pressed="false">Plan IGN</button>
+    </div>
+  </div>
+
+  <div class="ligne">
+    <label class="case"><input type="checkbox" id="relief" checked> Relief IGN</label>
+    <div class="aide">Sans relief, les bâtiments flottent à leur altitude réelle.</div>
+  </div>
+
+  <div class="ligne">
+    <label class="nom" for="decalage">Ajuster la hauteur des bâtiments <span class="valeur" id="decalage-val">0 m</span></label>
+    <input type="range" id="decalage" min="-60" max="60" step="0.5" value="0">
+    <div class="aide">À utiliser si les bâtiments s’enfoncent ou flottent au-dessus du sol.</div>
+  </div>
+
+  <div class="ligne">
+    <label class="case"><input type="checkbox" id="ombres"> Ombres du soleil</label>
+    <label class="nom" for="heure" style="margin-top:6px;font-weight:400">Heure <span class="valeur" id="heure-val">15 h</span></label>
+    <input type="range" id="heure" min="6" max="21" step="0.25" value="15" disabled>
+  </div>
+
+  <div class="ligne">
+    <button type="button" class="action" id="vue-ensemble">Revenir à la vue d’ensemble</button>
+  </div>
+
+  <div class="etat" aria-live="polite">
+    <p id="etat-batiments">Bâtiments : chargement…</p>
+    <p id="etat-relief">Relief : en attente</p>
+    <p>Cliquez sur un bâtiment pour afficher ses informations.</p>
+  </div>
+</aside>
+
+<section id="fiche" hidden aria-label="Informations du bâtiment">
+  <button id="fermer-fiche" aria-label="Fermer">×</button>
+  <h2 id="fiche-titre">Bâtiment</h2>
+  <table><tbody id="fiche-corps"></tbody></table>
+</section>
+
+<script>
+(async function () {
+  // ---------- Réglages ----------
+  const TILESET_URL = "3dtiles/tileset.json";
+  // Emprise approximative de NCPA (avec marge) : le relief n'est demandé à l'IGN que dans cette zone
+  const EMPRISE = Cesium.Rectangle.fromDegrees(-0.45, 48.95, 0.20, 49.45);
+  const VUE = { lon: -0.12, lat: 49.06, haut: 9000, cap: 0, inclinaison: -32 };
+  const COULEUR = "#E3D6BC", COULEUR_SURVOL = "#E9A93B", COULEUR_CHOIX = "#4E7F45";
+
+  // ---------- Fonds IGN (Géoplateforme, sans clé) ----------
+  const fondIGN = (couche, format) => new Cesium.WebMapTileServiceImageryProvider({
+    url: "https://data.geopf.fr/wmts", layer: couche, style: "normal", format,
+    tileMatrixSetID: "PM", maximumLevel: 19, credit: new Cesium.Credit("© IGN")
+  });
+  const fonds = {
+    ortho: () => fondIGN("ORTHOIMAGERY.ORTHOPHOTOS", "image/jpeg"),
+    plan: () => fondIGN("GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2", "image/png")
+  };
+
+  // ---------- Relief IGN (RGE ALTI, altitudes NGF, comme les bâtiments) ----------
+  const N = 65, grille = new Cesium.GeographicTilingScheme();
+  let reliefOk = 0, reliefKo = 0;
+  const majEtatRelief = () => {
+    const el = document.getElementById("etat-relief");
+    if (reliefOk === 0 && reliefKo > 0) {
+      el.textContent = "Relief : service IGN indisponible, sol plat affiché";
+      el.className = "erreur";
+    } else if (reliefOk > 0) {
+      el.textContent = `Relief : ${reliefOk} dalles chargées` + (reliefKo ? ` (${reliefKo} en échec)` : "");
+      el.className = "";
+    }
+  };
+  const reliefIGN = new Cesium.CustomHeightmapTerrainProvider({
+    width: N, height: N, tilingScheme: grille,
+    callback: function (x, y, niveau) {
+      const plat = new Float32Array(N * N);
+      if (niveau < 8) return plat;
+      const r = grille.tileXYToRectangle(x, y, niveau);
+      if (!Cesium.Rectangle.intersection(r, EMPRISE)) return plat;
+      const deg = Cesium.Math.toDegrees;
+      // élargit d'un demi-pixel pour que les points tombent pile sur les bords de dalle
+      const dx = (r.east - r.west) / (N - 1) / 2, dy = (r.north - r.south) / (N - 1) / 2;
+      const bbox = [deg(r.south - dy), deg(r.west - dx), deg(r.north + dy), deg(r.east + dx)].join(",");
+      const url = "https://data.geopf.fr/wms-r/wms?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap" +
+        "&LAYERS=ELEVATION.ELEVATIONGRIDCOVERAGE.HIGHRES&STYLES=&CRS=EPSG:4326" +
+        `&BBOX=${bbox}&WIDTH=${N}&HEIGHT=${N}&FORMAT=image/x-bil;bits=32`;
+      return fetch(url)
+        .then(rep => { if (!rep.ok) throw new Error(rep.status); return rep.arrayBuffer(); })
+        .then(buf => {
+          const h = new Float32Array(buf);
+          if (h.length !== N * N) throw new Error("taille inattendue");
+          for (let i = 0; i < h.length; i++) if (!(h[i] > -100 && h[i] < 2000)) h[i] = 0; // mer / pas de donnée
+          reliefOk++; majEtatRelief(); return h;
+        })
+        .catch(() => { reliefKo++; majEtatRelief(); return plat; });
+    }
+  });
+  const solPlat = new Cesium.EllipsoidTerrainProvider();
+
+  // ---------- Visionneuse ----------
+  const viewer = new Cesium.Viewer("carte", {
+    baseLayer: new Cesium.ImageryLayer(fonds.ortho()),
+    terrainProvider: reliefIGN,
+    geocoder: false, baseLayerPicker: false, sceneModePicker: false, navigationHelpButton: false,
+    animation: false, timeline: false, homeButton: false, fullscreenButton: false,
+    infoBox: false, selectionIndicator: false
+  });
+  const scene = viewer.scene;
+  scene.globe.depthTestAgainstTerrain = true;
+  scene.globe.maximumScreenSpaceError = 1.5;
+  viewer.shadowMap.softShadows = true;
+
+  const allerVueEnsemble = (duree) => viewer.camera.flyTo({
+    destination: Cesium.Cartesian3.fromDegrees(VUE.lon, VUE.lat, VUE.haut),
+    orientation: { heading: Cesium.Math.toRadians(VUE.cap), pitch: Cesium.Math.toRadians(VUE.inclinaison) },
+    duration: duree
+  });
+  allerVueEnsemble(0);
+
+  // ---------- Bâtiments ----------
+  const etatBat = document.getElementById("etat-batiments");
+  let tileset;
+  try {
+    tileset = await Cesium.Cesium3DTileset.fromUrl(TILESET_URL, { maximumScreenSpaceError: 8 });
+    scene.primitives.add(tileset);
+    tileset.style = new Cesium.Cesium3DTileStyle({ color: `color('${COULEUR}')` });
+    let tuiles = 0;
+    tileset.tileLoad.addEventListener(() => { tuiles++; etatBat.textContent = `Bâtiments : ${tuiles} tuiles chargées`; });
+    etatBat.textContent = "Bâtiments : prêts";
+  } catch (e) {
+    etatBat.className = "erreur";
+    etatBat.textContent = location.protocol === "file:"
+      ? "Bâtiments : la page doit être ouverte via le serveur local (http://localhost:8000), pas par double-clic."
+      : `Bâtiments : ${TILESET_URL} introuvable. Placez cette page dans le dossier carte3d.`;
+    console.error(e);
+  }
+
+  // ---------- Ajustement de hauteur ----------
+  const curseurH = document.getElementById("decalage");
+  curseurH.addEventListener("input", () => {
+    const h = Number(curseurH.value);
+    document.getElementById("decalage-val").textContent = `${h > 0 ? "+" : ""}${h} m`;
+    if (!tileset) return;
+    const c = Cesium.Cartographic.fromCartesian(tileset.boundingSphere.center);
+    const bas = Cesium.Cartesian3.fromRadians(c.longitude, c.latitude, 0);
+    const haut = Cesium.Cartesian3.fromRadians(c.longitude, c.latitude, h);
+    tileset.modelMatrix = Cesium.Matrix4.fromTranslation(Cesium.Cartesian3.subtract(haut, bas, new Cesium.Cartesian3()));
+  });
+
+  // ---------- Fond de carte ----------
+  document.querySelectorAll("[data-fond]").forEach(b => b.addEventListener("click", () => {
+    document.querySelectorAll("[data-fond]").forEach(x => x.setAttribute("aria-pressed", x === b));
+    viewer.imageryLayers.removeAll();
+    viewer.imageryLayers.addImageryProvider(fonds[b.dataset.fond]());
+  }));
+
+  // ---------- Relief ----------
+  document.getElementById("relief").addEventListener("change", e => {
+    viewer.terrainProvider = e.target.checked ? reliefIGN : solPlat;
+  });
+
+  // ---------- Ombres et heure ----------
+  const curseurHeure = document.getElementById("heure");
+  const regleHeure = () => {
+    const h = Number(curseurHeure.value), hh = Math.floor(h), mm = Math.round((h - hh) * 60);
+    document.getElementById("heure-val").textContent = `${hh} h ${mm ? String(mm).padStart(2, "0") : ""}`;
+    const d = new Date(); d.setHours(hh, mm, 0, 0);
+    viewer.clock.currentTime = Cesium.JulianDate.fromDate(d);
+    viewer.clock.shouldAnimate = false;
+  };
+  curseurHeure.addEventListener("input", regleHeure); regleHeure();
+  document.getElementById("ombres").addEventListener("change", e => {
+    viewer.shadows = e.target.checked;
+    if (tileset) tileset.shadows = e.target.checked ? Cesium.ShadowMode.ENABLED : Cesium.ShadowMode.DISABLED;
+    curseurHeure.disabled = !e.target.checked;
+  });
+
+  document.getElementById("vue-ensemble").addEventListener("click", () => allerVueEnsemble(1.5));
+
+  // ---------- Panneau repliable ----------
+  const panneau = document.getElementById("panneau"), replier = document.getElementById("replier");
+  replier.addEventListener("click", () => {
+    const replie = panneau.classList.toggle("replie");
+    replier.textContent = replie ? "+" : "–";
+    replier.setAttribute("aria-expanded", String(!replie));
+    replier.setAttribute("aria-label", replie ? "Déplier le panneau" : "Replier le panneau");
+  });
+
+  // ---------- Survol et clic ----------
+  let survole = null, choisi = null;
+  const estBatiment = f => f instanceof Cesium.Cesium3DTileFeature;
+  const couleurDe = f => f === choisi ? COULEUR_CHOIX : COULEUR;
+  const handler = new Cesium.ScreenSpaceEventHandler(scene.canvas);
+
+  handler.setInputAction(mvt => {
+    const f = scene.pick(mvt.endPosition);
+    if (survole && survole !== f) { try { survole.color = Cesium.Color.fromCssColorString(couleurDe(survole)); } catch (_) {} survole = null; }
+    if (estBatiment(f) && f !== choisi) { survole = f; f.color = Cesium.Color.fromCssColorString(COULEUR_SURVOL); }
+    scene.canvas.style.cursor = estBatiment(f) ? "pointer" : "";
+  }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+
+  const fiche = document.getElementById("fiche"), corps = document.getElementById("fiche-corps");
+  const fermerFiche = () => {
+    if (choisi) { try { choisi.color = Cesium.Color.fromCssColorString(COULEUR); } catch (_) {} }
+    choisi = null; fiche.hidden = true;
+  };
+  document.getElementById("fermer-fiche").addEventListener("click", fermerFiche);
+
+  handler.setInputAction(clic => {
+    const f = scene.pick(clic.position);
+    if (!estBatiment(f)) { fermerFiche(); return; }
+    if (choisi && choisi !== f) { try { choisi.color = Cesium.Color.fromCssColorString(COULEUR); } catch (_) {} }
+    choisi = f; survole = null;
+    f.color = Cesium.Color.fromCssColorString(COULEUR_CHOIX);
+    corps.innerHTML = "";
+    let titre = "Bâtiment";
+    for (const id of f.getPropertyIds()) {
+      let v = f.getProperty(id);
+      if (v === undefined || v === null || v === "") continue;
+      if (typeof v === "number" && !Number.isInteger(v)) v = v.toFixed(2);
+      if (/cleabs|identifiant/i.test(id) && titre === "Bâtiment") titre = String(v);
+      const tr = document.createElement("tr");
+      const a = document.createElement("td"); a.textContent = id;
+      const b = document.createElement("td"); b.textContent = String(v);
+      tr.append(a, b); corps.append(tr);
+    }
+    if (!corps.children.length) corps.innerHTML = "<tr><td>Aucun attribut dans les tuiles pour ce bâtiment.</td><td></td></tr>";
+    document.getElementById("fiche-titre").textContent = titre;
+    fiche.hidden = false;
+  }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+})();
+</script>
+</body>
+</html>
