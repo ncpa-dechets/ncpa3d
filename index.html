@@ -105,6 +105,18 @@
     color: var(--texte-doux); font-size: 18px; cursor: pointer; line-height: 1;
   }
 
+  .zoom {
+    position: absolute; z-index: 5; right: 12px; top: 50%; transform: translateY(-50%);
+    display: flex; flex-direction: column; border-radius: 4px; overflow: hidden;
+    box-shadow: 0 6px 24px rgba(20, 30, 36, 0.28);
+  }
+  .zoom button {
+    width: 40px; height: 40px; font: inherit; font-size: 22px; font-weight: 600; line-height: 1;
+    border: 0; cursor: pointer; background: var(--panneau); color: var(--texte);
+  }
+  .zoom button + button { border-top: 1px solid var(--trait); }
+  .zoom button:hover { background: var(--accent); color: var(--accent-texte); }
+
   .cesium-viewer-bottom { opacity: 0.8; }
   @media (max-width: 600px) {
     .panneau { width: auto; right: 12px; }
@@ -155,6 +167,11 @@
     <p>Cliquez sur un bâtiment pour afficher ses informations.</p>
   </div>
 </aside>
+
+<div class="zoom" role="group" aria-label="Zoom">
+  <button type="button" id="zoom-plus" aria-label="Zoomer" title="Zoomer">+</button>
+  <button type="button" id="zoom-moins" aria-label="Dézoomer" title="Dézoomer">−</button>
+</div>
 
 <section id="fiche" hidden aria-label="Informations du bâtiment">
   <button id="fermer-fiche" aria-label="Fermer">×</button>
@@ -300,6 +317,21 @@
   });
 
   document.getElementById("vue-ensemble").addEventListener("click", () => allerVueEnsemble(1.5));
+
+  // ---------- Boutons de zoom ----------
+  // distance au sol visé au centre de l'écran (repli : hauteur de la caméra)
+  const distanceAuSol = () => {
+    const centre = new Cesium.Cartesian2(scene.canvas.clientWidth / 2, scene.canvas.clientHeight / 2);
+    const cible = scene.globe.pick(viewer.camera.getPickRay(centre), scene);
+    return cible ? Cesium.Cartesian3.distance(viewer.camera.positionWC, cible) : viewer.camera.positionCartographic.height;
+  };
+  document.getElementById("zoom-plus").addEventListener("click", () => {
+    const d = distanceAuSol();
+    if (d > 30) viewer.camera.zoomIn(d * 0.5);
+  });
+  document.getElementById("zoom-moins").addEventListener("click", () => {
+    if (viewer.camera.positionCartographic.height < 200000) viewer.camera.zoomOut(distanceAuSol());
+  });
 
   // ---------- Panneau repliable ----------
   const panneau = document.getElementById("panneau"), replier = document.getElementById("replier");
