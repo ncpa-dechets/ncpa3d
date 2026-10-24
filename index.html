@@ -4,181 +4,298 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Bâtiments 3D de NCPA</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;600;700&display=swap" rel="stylesheet">
 <link href="https://cesium.com/downloads/cesiumjs/releases/1.120/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
 <script src="https://cesium.com/downloads/cesiumjs/releases/1.120/Build/Cesium/Cesium.js"></script>
 <style>
+  /* Thème sombre unique, comme le démonstrateur bâtiments 3D de la Géoplateforme */
   :root {
-    color-scheme: light;
-    --panneau: rgba(238, 241, 242, 0.94);
-    --texte: #24323B;
-    --texte-doux: #5A6A74;
-    --trait: #C9D1D5;
-    --accent: #4E7F45;          /* vert bocage */
-    --accent-texte: #FFFFFF;
-    --survol: #E9A93B;          /* ambre */
-    --pierre: #E3D6BC;          /* pierre de Caen */
-    --fond-bouton: #FFFFFF;
+    color-scheme: dark;
+    --carte: rgb(32, 34, 38);
+    --carte-voile: rgba(32, 34, 38, 0.92);
+    --bouton: #313336bb;
+    --bouton-actif: #222222;
+    --bord: #222222;
+    --texte: #f2f2f2;
+    --texte-doux: #b8bcc4;
+    --texte-attenue: #9aa0a8;
+    --trait: rgba(255, 255, 255, 0.1);
+    --lien: #8ec5ff;
+    --ombre: 0 6px 24px rgba(0, 0, 0, 0.35);
+    --police: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, Menlo, Consolas, monospace;
   }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      color-scheme: dark;
-      --panneau: rgba(30, 42, 51, 0.94);
-      --texte: #EEF1F2;
-      --texte-doux: #A9B6BD;
-      --trait: #3D505C;
-      --accent: #7FB173;
-      --accent-texte: #14201A;
-      --fond-bouton: #2A3A45;
+  html { height: 100%; background: #202226; }
+  html, body { overscroll-behavior: none; }
+  body { margin: 0; height: 100%; overflow: hidden; font: 14px/1.4 var(--police); color: var(--texte); }
+  #carte { position: absolute; inset: 0; -webkit-tap-highlight-color: transparent; }
+  .cesium-widget-credits { display: none !important; }
+  button { font-family: inherit; }
+  button:focus-visible, input:focus-visible, a:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--lien); outline-offset: 2px;
+  }
+  [hidden] { display: none !important; }
+
+  /* ---------- Recherche ---------- */
+  #recherche {
+    position: absolute; z-index: 30; top: calc(12px + env(safe-area-inset-top, 0px));
+    left: 50%; width: 360px; margin-left: -180px;
+  }
+  #recherche form {
+    display: flex; flex-direction: column; margin: 0;
+    max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px); overflow-y: auto;
+    scroll-padding-top: 42px; background: var(--carte); border: 1px solid var(--bord);
+    border-radius: 10px; box-shadow: var(--ombre); transition: box-shadow 0.15s ease;
+  }
+  #recherche form:focus-within { box-shadow: 0 0 0 2px rgba(142, 197, 255, 0.55), var(--ombre); }
+  #recherche input {
+    position: sticky; top: 0; flex: none; box-sizing: border-box; width: 100%; height: 40px;
+    padding: 0 38px 0 40px; border: 0; outline: none; color: var(--texte); font: 14px var(--police);
+    text-overflow: ellipsis;
+    background: var(--carte) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239aa0a8' stroke-width='2.2' stroke-linecap='round'%3E%3Ccircle cx='10.5' cy='10.5' r='6.5'/%3E%3Cpath d='M15.5 15.5 20 20'/%3E%3C/svg%3E") no-repeat 13px center / 17px;
+  }
+  #recherche input::placeholder { color: var(--texte-attenue); }
+  #recherche input::-webkit-search-cancel-button { display: none; }
+  .suggestion {
+    display: flex; align-items: center; padding: 0 12px 0 40px; border-top: 1px solid rgba(255, 255, 255, 0.08);
+    color: #d0d3d8; cursor: pointer;
+  }
+  .suggestion p { margin: 8px 0; line-height: 1.35; }
+  .suggestion strong { color: white; font-weight: 600; }
+  .suggestion.actif, .suggestion:hover { background: rgba(255, 255, 255, 0.1); }
+  .suggestion.vide { cursor: default; color: var(--texte-attenue); }
+  .suggestion.vide:hover { background: none; }
+  #effacer {
+    position: absolute; top: 6px; right: 6px; width: 30px; height: 30px; border: 0; border-radius: 6px;
+    background: transparent; color: #d0d3d8; font-size: 20px; line-height: 1; cursor: pointer;
+  }
+  #effacer:hover { background: rgba(255, 255, 255, 0.1); color: white; }
+  #recherche:has(input:placeholder-shown) #effacer { display: none; }
+
+  /* ---------- Colonne de navigation ---------- */
+  #navigation {
+    position: absolute; z-index: 10; left: 10px; bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+    display: flex; flex-direction: column-reverse; align-items: center; gap: 10px;
+  }
+  .barre { display: flex; flex-direction: column; }
+  .bouton {
+    width: 30px; height: 30px; padding: 0; display: flex; align-items: center; justify-content: center;
+    background: var(--bouton); border: 1px solid var(--bord); color: white;
+    font-weight: 900; font-size: 15px; line-height: 1; cursor: pointer; border-radius: 7px;
+  }
+  .bouton:active, .bouton[aria-expanded="true"] { background: var(--bouton-actif); }
+  .bouton svg { width: 16px; height: 16px; }
+  .barre .bouton { border-radius: 0; }
+  .barre .bouton:first-child { border-radius: 7px 7px 0 0; }
+  .barre .bouton:last-child { border-radius: 0 0 7px 7px; }
+  .barre .bouton + .bouton { margin-top: -1px; }
+  #boussole {
+    width: 60px; height: 60px; border-radius: 50%; border: 0; padding: 0; background: none; cursor: pointer;
+  }
+  #boussole svg { width: 100%; height: 100%; display: block; }
+  @media (max-height: 450px) {
+    #navigation { flex-direction: row; align-items: flex-end; gap: 6px; }
+  }
+
+  /* ---------- Réglages (⚙) ---------- */
+  #reglages {
+    position: absolute; z-index: 25; left: 52px; bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+    width: 270px; max-width: calc(100vw - 64px); max-height: calc(100% - 90px); overflow-y: auto;
+    box-sizing: border-box; padding: 12px 14px 10px; background: var(--carte-voile); border: 1px solid var(--bord);
+    border-radius: 10px; box-shadow: var(--ombre); animation: apparition 0.18s ease-out;
+  }
+  @media (max-height: 450px) { #reglages { left: 10px; bottom: calc(76px + env(safe-area-inset-bottom, 0px)); max-height: calc(100% - 140px); } }
+  #reglages h2 { margin: 0 0 10px; font-size: 15px; font-weight: 600; }
+  .reglage { margin: 0 0 12px; }
+  .reglage .nom { display: flex; justify-content: space-between; color: #e0e3e8; font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+  .reglage .nom output { color: var(--texte-doux); font-weight: 400; font-variant-numeric: tabular-nums; }
+  .reglage .aide { color: var(--texte-attenue); font-size: 12px; margin-top: 4px; }
+  .segments { display: flex; border: 1px solid rgba(255, 255, 255, 0.18); border-radius: 7px; overflow: hidden; }
+  .segments button {
+    flex: 1; padding: 6px 8px; border: 0; background: transparent; color: #d0d3d8; font-size: 13px; cursor: pointer;
+  }
+  .segments button + button { border-left: 1px solid rgba(255, 255, 255, 0.18); }
+  .segments button[aria-pressed="true"] { background: rgba(255, 255, 255, 0.14); color: white; font-weight: 600; }
+  label.interrupteur { display: flex; align-items: center; justify-content: space-between; gap: 10px; cursor: pointer; font-size: 13px; font-weight: 600; color: #e0e3e8; }
+  label.interrupteur input { accent-color: var(--lien); width: 16px; height: 16px; margin: 0; }
+  #reglages input[type="range"] { width: 100%; margin: 0; accent-color: var(--lien); }
+  .etat { border-top: 1px solid var(--trait); padding-top: 8px; font-size: 12px; color: var(--texte-attenue); }
+  .etat p { margin: 0 0 2px; }
+  .etat .erreur { color: #ff9b8a; }
+
+  /* ---------- Fiche bâtiment : carte en haut à droite, feuille du bas sur téléphone ---------- */
+  #fiche {
+    position: fixed; z-index: 20; top: calc(12px + env(safe-area-inset-top, 0px)); right: 12px;
+    width: 340px; max-height: calc(100% - 84px); display: flex; flex-direction: column; overflow: hidden;
+    box-sizing: border-box; background: var(--carte-voile); border: 1px solid var(--bord); border-radius: 10px;
+    box-shadow: var(--ombre); animation: apparition 0.18s ease-out;
+  }
+  @keyframes apparition { from { opacity: 0; transform: translateY(-6px); } }
+  .fiche-entete { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; padding: 12px 10px 8px 14px; }
+  .fiche-titre { margin: 0; font-size: 17px; font-weight: 600; overflow-wrap: anywhere; }
+  .fiche-sous-titre { margin: 2px 0 0; color: var(--texte-doux); font-size: 13px; }
+  .fermer {
+    flex: none; width: 30px; height: 30px; border: 0; border-radius: 6px; background: transparent;
+    color: #d0d3d8; font-size: 22px; line-height: 1; cursor: pointer;
+  }
+  .fermer:hover { background: rgba(255, 255, 255, 0.1); color: white; }
+  .fiche-corps { overflow-y: auto; padding: 0 14px 10px; }
+  .chiffres { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 2px 0 10px; }
+  .chiffre { display: flex; flex-direction: column; align-items: center; padding: 8px 4px; border-radius: 8px; background: rgba(255, 255, 255, 0.07); }
+  .chiffre b { font-size: 18px; font-weight: 600; }
+  .chiffre span { color: var(--texte-doux); font-size: 12px; }
+  .section { border-top: 1px solid var(--trait); padding: 4px 0; }
+  .section > summary { padding: 4px 0; color: #e0e3e8; font-size: 13px; font-weight: 600; cursor: pointer; }
+  .lignes { display: grid; grid-template-columns: fit-content(50%) minmax(0, 1fr); gap: 3px 12px; margin: 2px 0 6px; }
+  .lignes dt { color: var(--texte-doux); overflow-wrap: anywhere; }
+  .lignes dd { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin: 0; overflow-wrap: anywhere; }
+  .lignes.brutes { grid-template-columns: minmax(0, 1fr); row-gap: 0; font: 12px/1.4 var(--mono); }
+  .lignes.brutes dd { margin-bottom: 6px; }
+  #fiche a { color: var(--lien); }
+  .ident { font: 12px/1.4 var(--mono); }
+  .copier {
+    flex: none; padding: 1px 6px; border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 5px;
+    background: transparent; color: #d0d3d8; font-size: 11px; cursor: pointer;
+  }
+  .copier:hover { background: rgba(255, 255, 255, 0.1); }
+  @media (pointer: coarse) { .copier { min-height: 28px; padding: 0 10px; } }
+  @media (max-width: 1099px) { #fiche { top: calc(64px + env(safe-area-inset-top, 0px)); max-height: calc(100% - 136px); } }
+  @media (max-width: 640px) {
+    #fiche {
+      top: auto; right: 0; bottom: 0; left: 0; z-index: 1001; width: auto; max-height: 55%;
+      border-radius: 14px 14px 0 0; background: var(--carte); animation-name: feuille;
+      padding-bottom: env(safe-area-inset-bottom, 0px);
     }
   }
-  html, body { height: 100%; margin: 0; }
-  body {
-    font-family: "Public Sans", "Segoe UI", system-ui, sans-serif;
-    font-size: 14px; line-height: 1.45; color: var(--texte); background: #24323B;
-  }
-  #carte { position: absolute; inset: 0; }
+  @keyframes feuille { from { transform: translateY(100%); } }
 
-  .panneau {
-    position: absolute; z-index: 5;
-    top: calc(12px + env(safe-area-inset-top, 0px)); left: 12px;
-    width: 290px; max-width: calc(100% - 24px); box-sizing: border-box;
-    background: var(--panneau); backdrop-filter: blur(6px);
-    border-left: 4px solid var(--accent); border-radius: 4px;
-    padding: 14px 16px 12px; box-shadow: 0 6px 24px rgba(20, 30, 36, 0.28);
+  /* ---------- Pastilles du bas : heure, état, crédits ---------- */
+  .pastille {
+    border: 1px solid var(--bord); border-radius: 999px; background: var(--bouton);
+    color: rgba(255, 255, 255, 0.85); font: 12px/16px var(--police); white-space: nowrap;
   }
-  .panneau h1 { font-size: 18px; line-height: 1.2; margin: 0 0 2px; font-weight: 700; }
-  .panneau .sous-titre { color: var(--texte-doux); margin: 0 0 12px; font-size: 13px; }
-  .ligne { margin: 0 0 12px; }
-  .ligne > .nom { display: block; font-weight: 600; margin-bottom: 5px; }
-  .ligne .aide { color: var(--texte-doux); font-size: 12.5px; margin-top: 3px; }
-
-  .bascule { display: flex; border: 1px solid var(--trait); border-radius: 4px; overflow: hidden; }
-  .bascule button {
-    flex: 1; font: inherit; padding: 6px 8px; border: 0; cursor: pointer;
-    background: var(--fond-bouton); color: var(--texte);
+  #bas-centre {
+    position: absolute; z-index: 10; left: 50%; transform: translateX(-50%);
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none;
   }
-  .bascule button + button { border-left: 1px solid var(--trait); }
-  .bascule button[aria-pressed="true"] { background: var(--accent); color: var(--accent-texte); font-weight: 600; }
-
-  label.case { display: flex; gap: 8px; align-items: center; cursor: pointer; font-weight: 600; }
-  input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px; margin: 0; }
-  input[type="range"] { width: 100%; accent-color: var(--accent); margin: 2px 0 0; }
-  .valeur { float: right; font-weight: 400; color: var(--texte-doux); font-variant-numeric: tabular-nums; }
-
-  .action {
-    width: 100%; font: inherit; font-weight: 600; padding: 8px; cursor: pointer;
-    border: 1px solid var(--accent); border-radius: 4px; background: transparent; color: var(--texte);
+  #bas-centre > * { pointer-events: auto; }
+  #heure-pastille { display: flex; align-items: center; gap: 8px; padding: 5px 12px 5px 9px; }
+  #heure-pastille svg { width: 16px; height: 16px; flex: none; color: #ffd27a; }
+  #heure { width: 150px; margin: 0; accent-color: #ffd27a; cursor: pointer; }
+  #heure-val { min-width: 52px; text-align: right; font-variant-numeric: tabular-nums; color: white; font-weight: 600; }
+  #statut { display: flex; align-items: center; gap: 7px; padding: 4px 12px; }
+  #statut .roue {
+    width: 10px; height: 10px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.25);
+    border-top-color: white; animation: tourne 0.9s linear infinite;
   }
-  .action:hover { background: var(--accent); color: var(--accent-texte); }
-  button:focus-visible, input:focus-visible { outline: 2px solid var(--survol); outline-offset: 2px; }
-
-  .etat { border-top: 1px solid var(--trait); padding-top: 9px; margin-top: 4px; font-size: 12.5px; color: var(--texte-doux); }
-  .etat p { margin: 0 0 2px; }
-  .etat .erreur { color: #C2412D; }
-
-  #replier {
-    position: absolute; top: 10px; right: 10px; border: 0; background: transparent;
-    color: var(--texte-doux); font: inherit; font-size: 18px; cursor: pointer; line-height: 1; padding: 2px 6px;
+  @keyframes tourne { to { transform: rotate(360deg); } }
+  #credits {
+    position: absolute; z-index: 10; right: 12px; bottom: calc(21px + env(safe-area-inset-bottom, 0px));
+    padding: 4px 12px; color: rgba(255, 255, 255, 0.72);
   }
-  .panneau.replie > :not(h1):not(#replier) { display: none; }
-  .panneau.replie h1 { margin: 0; }
-
-  #fiche {
-    position: absolute; z-index: 5; right: 12px;
-    bottom: calc(36px + env(safe-area-inset-bottom, 0px));
-    width: 330px; max-width: calc(100% - 24px); max-height: 55vh; overflow: auto; box-sizing: border-box;
-    background: var(--panneau); backdrop-filter: blur(6px);
-    border-top: 4px solid var(--survol); border-radius: 4px;
-    padding: 12px 14px; box-shadow: 0 6px 24px rgba(20, 30, 36, 0.28);
+  #credits a { color: inherit; text-decoration: none; }
+  #credits a:hover, #credits a:focus-visible { color: white; text-decoration: underline; text-underline-offset: 2px; }
+  @media (max-width: 640px) {
+    #recherche { left: 12px; right: 12px; width: auto; margin-left: 0; z-index: 1002; }
+    #recherche input { font-size: 16px; }
+    #bas-centre { left: 82px; right: 12px; transform: none; bottom: calc(52px + env(safe-area-inset-bottom, 0px)); }
+    #heure { width: 110px; }
+    #credits { bottom: calc(12px + env(safe-area-inset-bottom, 0px)); }
   }
-  #fiche[hidden] { display: none; }
-  #fiche h2 { font-size: 15px; margin: 0 26px 8px 0; word-break: break-all; }
-  #fiche table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
-  #fiche td { padding: 3px 0; border-bottom: 1px solid var(--trait); vertical-align: top; }
-  #fiche td:first-child { color: var(--texte-doux); padding-right: 10px; word-break: break-word; }
-  #fiche td:last-child { text-align: right; font-variant-numeric: tabular-nums; word-break: break-all; }
-  #fermer-fiche {
-    position: absolute; top: 8px; right: 8px; border: 0; background: transparent;
-    color: var(--texte-doux); font-size: 18px; cursor: pointer; line-height: 1;
-  }
-
-  .zoom {
-    position: absolute; z-index: 5; right: 12px; top: 50%; transform: translateY(-50%);
-    display: flex; flex-direction: column; border-radius: 4px; overflow: hidden;
-    box-shadow: 0 6px 24px rgba(20, 30, 36, 0.28);
-  }
-  .zoom button {
-    width: 40px; height: 40px; font: inherit; font-size: 22px; font-weight: 600; line-height: 1;
-    border: 0; cursor: pointer; background: var(--panneau); color: var(--texte);
-  }
-  .zoom button + button { border-top: 1px solid var(--trait); }
-  .zoom button:hover { background: var(--accent); color: var(--accent-texte); }
-
-  .cesium-viewer-bottom { opacity: 0.8; }
-  @media (max-width: 600px) {
-    .panneau { width: auto; right: 12px; }
-    #fiche { left: 12px; right: 12px; width: auto; max-height: 40vh; }
+  @media (pointer: coarse) { #recherche input { font-size: 16px; } }
+  @media (prefers-reduced-motion: reduce) {
+    #fiche, #reglages { animation: none; }
+    #statut .roue { animation-duration: 3s; }
   }
 </style>
 </head>
 <body>
 <div id="carte"></div>
 
-<aside class="panneau" id="panneau" aria-label="Réglages de la carte">
-  <h1>Bâtiments 3D de NCPA</h1>
-  <button id="replier" aria-expanded="true" aria-label="Replier le panneau" title="Replier">–</button>
-  <p class="sous-titre">Toitures reconstruites à partir du LiDAR HD et de la BD TOPO (IGN)</p>
+<div id="recherche">
+  <form autocomplete="off" role="search">
+    <input type="search" id="lieu" placeholder="Rechercher un lieu ou une adresse" aria-label="Rechercher un lieu"
+      enterkeyhint="search" autocapitalize="off" autocorrect="off" spellcheck="false"
+      role="combobox" aria-expanded="false" aria-controls="suggestions" aria-autocomplete="list">
+    <div id="suggestions" role="listbox" aria-label="Suggestions"></div>
+  </form>
+  <button type="button" id="effacer" aria-label="Effacer la recherche" title="Effacer">×</button>
+</div>
 
-  <div class="ligne">
-    <span class="nom">Fond de carte</span>
-    <div class="bascule" role="group" aria-label="Fond de carte">
+<nav id="navigation" aria-label="Navigation">
+  <button type="button" id="boussole" title="Orienter la vue vers le nord" aria-label="Orienter la vue vers le nord">
+    <svg viewBox="0 0 60 60" aria-hidden="true">
+      <circle cx="30" cy="30" r="27" fill="#313336" fill-opacity="0.73" stroke="#222" stroke-width="1.5"/>
+      <circle cx="30" cy="30" r="21" fill="none" stroke="rgba(255,255,255,0.18)" stroke-width="1"/>
+      <g id="aiguille">
+        <path d="M30 9 L36 30 L24 30 Z" fill="#e8564a"/>
+        <path d="M30 51 L36 30 L24 30 Z" fill="#e6e6e6"/>
+        <circle cx="30" cy="30" r="2.6" fill="#313336"/>
+        <text x="30" y="7.4" text-anchor="middle" font-size="7" font-weight="700" fill="white" font-family="system-ui, sans-serif">N</text>
+      </g>
+    </svg>
+  </button>
+
+  <button type="button" class="bouton" id="bascule-3d" title="Basculer entre vue de dessus et vue inclinée">2D</button>
+  <div class="barre">
+    <button type="button" class="bouton" id="zoom-plus" title="Zoomer" aria-label="Zoomer">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5v11M2.5 8h11" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
+    </button>
+    <button type="button" class="bouton" id="zoom-moins" title="Dézoomer" aria-label="Dézoomer">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 8h11" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
+    </button>
+  </div>
+  <div class="barre">
+    <button type="button" class="bouton" id="incliner-sol" title="Incliner la vue vers le sol" aria-label="Incliner la vue vers le sol" style="font-size:20px">&#8593;</button>
+    <button type="button" class="bouton" id="incliner-horizon" title="Incliner la vue vers l'horizon" aria-label="Incliner la vue vers l'horizon" style="font-size:20px">&#8595;</button>
+  </div>
+  <button type="button" class="bouton" id="vue-initiale" title="Revenir à la vue initiale" aria-label="Revenir à la vue initiale">&#8634;</button>
+  <button type="button" class="bouton" id="bouton-reglages" aria-expanded="false" aria-controls="reglages" title="Réglages de la carte" aria-label="Réglages de la carte">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>
+  </button>
+</nav>
+
+<section id="reglages" hidden aria-label="Réglages de la carte">
+  <h2>Réglages</h2>
+  <div class="reglage">
+    <div class="nom">Fond de carte</div>
+    <div class="segments" role="group" aria-label="Fond de carte">
       <button type="button" data-fond="ortho" aria-pressed="true">Photo aérienne</button>
-      <button type="button" data-fond="plan" aria-pressed="false">Plan IGN</button>
+      <button type="button" data-fond="plan" aria-pressed="false">Plan</button>
     </div>
   </div>
-
-  <div class="ligne">
-    <label class="case"><input type="checkbox" id="relief" checked> Relief IGN</label>
+  <div class="reglage">
+    <label class="interrupteur">Relief <input type="checkbox" id="relief" checked></label>
     <div class="aide">Sans relief, les bâtiments flottent à leur altitude réelle.</div>
   </div>
-
-  <div class="ligne">
-    <label class="nom" for="decalage">Ajuster la hauteur des bâtiments <span class="valeur" id="decalage-val">0 m</span></label>
+  <div class="reglage">
+    <label class="interrupteur">Ombres du soleil <input type="checkbox" id="ombres" checked></label>
+  </div>
+  <div class="reglage">
+    <label class="nom" for="decalage">Hauteur des bâtiments <output id="decalage-val">0 m</output></label>
     <input type="range" id="decalage" min="-60" max="60" step="0.5" value="0">
     <div class="aide">À utiliser si les bâtiments s’enfoncent ou flottent au-dessus du sol.</div>
   </div>
-
-  <div class="ligne">
-    <label class="case"><input type="checkbox" id="ombres"> Ombres du soleil</label>
-    <label class="nom" for="heure" style="margin-top:6px;font-weight:400">Heure <span class="valeur" id="heure-val">15 h</span></label>
-    <input type="range" id="heure" min="6" max="21" step="0.25" value="15" disabled>
-  </div>
-
-  <div class="ligne">
-    <button type="button" class="action" id="vue-ensemble">Revenir à la vue d’ensemble</button>
-  </div>
-
   <div class="etat" aria-live="polite">
     <p id="etat-batiments">Bâtiments : chargement…</p>
     <p id="etat-relief">Relief : en attente</p>
-    <p>Cliquez sur un bâtiment pour afficher ses informations.</p>
     <p>Clic droit : contrôle de l’altitude du sol sous le curseur.</p>
   </div>
-</aside>
+</section>
 
-<div class="zoom" role="group" aria-label="Zoom">
-  <button type="button" id="zoom-plus" aria-label="Zoomer" title="Zoomer">+</button>
-  <button type="button" id="zoom-moins" aria-label="Dézoomer" title="Dézoomer">−</button>
+<aside id="fiche" hidden aria-label="Informations sur le bâtiment"></aside>
+
+<div id="bas-centre">
+  <div id="statut" class="pastille" hidden role="status" aria-live="polite"><span class="roue" aria-hidden="true"></span><span id="statut-texte">Chargement…</span></div>
+  <div id="heure-pastille" class="pastille">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="currentColor"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg>
+    <input type="range" id="heure" min="6" max="21" step="0.25" value="15" aria-label="Heure du soleil pour les ombres">
+    <span id="heure-val">15 h 00</span>
+  </div>
 </div>
 
-<section id="fiche" hidden aria-label="Informations du bâtiment">
-  <button id="fermer-fiche" aria-label="Fermer">×</button>
-  <h2 id="fiche-titre">Bâtiment</h2>
-  <table><tbody id="fiche-corps"></tbody></table>
-</section>
+<footer id="credits" class="pastille">© <a href="https://www.ign.fr/" target="_blank" rel="noopener">IGN</a> · <a href="https://cesium.com/platform/cesiumjs/" target="_blank" rel="noopener">CesiumJS</a></footer>
+<div id="credits-cesium" hidden></div>
 
 <script>
 (async function () {
@@ -187,7 +304,13 @@
   // Emprise approximative de NCPA (avec marge) : le relief n'est demandé à l'IGN que dans cette zone
   const EMPRISE = Cesium.Rectangle.fromDegrees(-0.45, 48.95, 0.20, 49.45);
   const VUE = { lon: -0.12, lat: 49.06, haut: 9000, cap: 0, inclinaison: -32 };
-  const COULEUR = "#E3D6BC", COULEUR_SURVOL = "#E9A93B", COULEUR_CHOIX = "#4E7F45";
+  const COULEUR = "#E8E4DC", COULEUR_CHOIX = "#FFFFA0";
+  const TACTILE = matchMedia("(pointer: coarse)").matches;
+  // Au-delà de cette hauteur de caméra, les bâtiments sont masqués : nos tuiles n'ont pas de niveau
+  // simplifié, la vue lointaine demanderait de tout charger. Hystérésis pour éviter le clignotement.
+  const SEUIL_MASQUAGE = TACTILE ? 14000 : 22000;
+  const mouvementReduit = matchMedia("(prefers-reduced-motion: reduce)");
+  const duree = s => mouvementReduit.matches ? 0 : s;
 
   // ---------- Fonds IGN (Géoplateforme, sans clé) ----------
   const fondIGN = (couche, format) => new Cesium.WebMapTileServiceImageryProvider({
@@ -211,6 +334,7 @@
   // parasites de -10 à -9999 m. Sous ALT_MIN, on considère donc qu'il s'agit de la mer.
   const MAX_REQUETES = 4, ESSAIS = 3;      // ménage le service IGN (erreurs 429)
   let reliefOk = 0, reliefRejet = 0, reliefKo = 0, enCours = 0, pauseJusqua = 0;
+  let deplacementRapide = false;           // mis à jour à chaque image d'après la vitesse de la caméra
   const majEtatRelief = () => {
     const el = document.getElementById("etat-relief");
     const details = [reliefRejet && `${reliefRejet} rejetées`, reliefKo && `${reliefKo} en échec`].filter(Boolean).join(", ");
@@ -236,7 +360,8 @@
       const r = grille.tileXYToRectangle(x, y, niveau);
       if (!Cesium.Rectangle.intersection(r, EMPRISE)) return plat;
       // undefined = « réessaie plus tard » pour Cesium : limite le nombre de requêtes simultanées
-      if (enCours >= MAX_REQUETES || Date.now() < pauseJusqua) return undefined;
+      // et n'en lance pas pendant un déplacement rapide (dalles aussitôt hors champ)
+      if (enCours >= MAX_REQUETES || Date.now() < pauseJusqua || deplacementRapide) return undefined;
       const deg = Cesium.Math.toDegrees;
       // élargit d'un demi-pixel pour que les points tombent pile sur les bords de dalle
       const dx = (r.east - r.west) / (N - 1) / 2, dy = (r.north - r.south) / (N - 1) / 2;
@@ -271,29 +396,99 @@
     terrainProvider: reliefIGN,
     geocoder: false, baseLayerPicker: false, sceneModePicker: false, navigationHelpButton: false,
     animation: false, timeline: false, homeButton: false, fullscreenButton: false,
-    infoBox: false, selectionIndicator: false
+    infoBox: false, selectionIndicator: false,
+    creditContainer: document.getElementById("credits-cesium"),
+    shadows: true
   });
-  const scene = viewer.scene;
-  scene.globe.depthTestAgainstTerrain = true;
-  scene.globe.maximumScreenSpaceError = 1.5;
+  const scene = viewer.scene, camera = viewer.camera, globe = scene.globe;
+  globe.depthTestAgainstTerrain = true;
+  // Relief : un peu moins de détail qu'avant (1,5) pour ne pas demander de dalles invisibles à l'œil
+  globe.maximumScreenSpaceError = TACTILE ? 4 : 2;
+  globe.preloadSiblings = false;
+  globe.tileCacheSize = TACTILE ? 50 : 100;
+  // Ombres : carte 4096 px (2048 sur écran tactile), filtrage doux, limitées aux 5 premiers km
+  viewer.shadowMap.size = TACTILE ? 2048 : 4096;
   viewer.shadowMap.softShadows = true;
+  viewer.shadowMap.maximumDistance = 5000;
+  // Biais plus forts que ceux de Cesium : sans eux, les toits s'auto-ombrent en rayures
+  Object.assign(viewer.shadowMap._primitiveBias, { normalOffsetScale: 3.0, depthBias: 0.0003 });
+  globe.shadows = Cesium.ShadowMode.RECEIVE_ONLY;
+  if (/[?&]mesure\b/.test(location.search)) window.__v = { viewer, get tileset() { return tileset; } };
 
-  const allerVueEnsemble = (duree) => viewer.camera.flyTo({
+  const allerVueEnsemble = (d) => camera.flyTo({
     destination: Cesium.Cartesian3.fromDegrees(VUE.lon, VUE.lat, VUE.haut),
     orientation: { heading: Cesium.Math.toRadians(VUE.cap), pitch: Cesium.Math.toRadians(VUE.inclinaison) },
-    duration: duree
+    duration: d
   });
   allerVueEnsemble(0);
+
+  // ---------- Rendu des bâtiments (même matériau que le démonstrateur IGN) ----------
+  // Facettes à plat, toits légèrement plus froids, ciel hémisphérique (45 %) + soleil (55 %).
+  // Le soleil suit l'heure choisie. L'albédo vient du style (couleur par bâtiment), multiplié
+  // ensuite par Cesium : la couleur de sélection reste donc éclairée normalement.
+  // Cesium assombrit encore les faces à contre-jour (ombrage « normal » de la carte d'ombres) :
+  // on divise par ce facteur pour retrouver le même éclairage que sans ombres.
+  const SOURCE_OMBRAGE = `
+    void fragmentMain(FragmentInput fsInput, inout czm_modelMaterial material) {
+      vec3 p = fsInput.attributes.positionEC;
+      vec3 n = normalize(cross(dFdx(p), dFdy(p)));
+      if (dot(n, p) > 0.0) n = -n;                         // face tournée vers la caméra
+      vec3 haut = normalize(czm_viewRotation * normalize(fsInput.attributes.positionWC));
+      vec3 l = czm_lightDirectionEC;
+      float verticalite = dot(n, haut);
+      float toit = smoothstep(0.55, 0.8, verticalite);
+      float dessous = smoothstep(0.55, 0.8, -verticalite);
+      vec3 ciel = mix(vec3(0.262, 0.231, 0.195), vec3(0.791, 0.855, 1.0), 0.5 * verticalite + 0.5) * 0.528;
+      float jour = smoothstep(-0.03, 0.05, dot(l, haut));
+      vec3 soleil = vec3(1.0, 0.922, 0.823) * 1.03 * max(dot(n, l), 0.0) * jour;
+      vec3 e = (ciel + soleil)
+        * mix(vec3(1.0), vec3(0.91, 0.92, 0.94), toit)
+        * mix(1.0, 0.6, dessous);
+      if (u_ombres > 0.5) {
+        float s = clamp(dot(normalize(fsInput.attributes.normalEC), l) / 0.05, 0.0, 1.0); // normalShadingSmooth
+        e /= max(s, u_obscurite);
+      }
+      material.diffuse = e;
+      material.alpha = u_opacite;
+    }`;
+  const uniformes = () => ({
+    u_ombres: { type: Cesium.UniformType.FLOAT, value: 1 },
+    u_obscurite: { type: Cesium.UniformType.FLOAT, value: 0.45 },
+    u_opacite: { type: Cesium.UniformType.FLOAT, value: 1 }
+  });
+  const ombrage = new Cesium.CustomShader({
+    lightingModel: Cesium.LightingModel.UNLIT, translucencyMode: Cesium.CustomShaderTranslucencyMode.OPAQUE,
+    uniforms: uniformes(), fragmentShaderText: SOURCE_OMBRAGE
+  });
+  // Variante translucide, utilisée seulement pendant le fondu d'apparition/disparition
+  const ombrageFondu = new Cesium.CustomShader({
+    lightingModel: Cesium.LightingModel.UNLIT, translucencyMode: Cesium.CustomShaderTranslucencyMode.TRANSLUCENT,
+    uniforms: uniformes(), fragmentShaderText: SOURCE_OMBRAGE
+  });
+  const regleUniforme = (nom, v) => { ombrage.setUniform(nom, v); ombrageFondu.setUniform(nom, v); };
 
   // ---------- Bâtiments ----------
   const etatBat = document.getElementById("etat-batiments");
   let tileset;
   try {
-    tileset = await Cesium.Cesium3DTileset.fromUrl(TILESET_URL, { maximumScreenSpaceError: 8 });
+    tileset = await Cesium.Cesium3DTileset.fromUrl(TILESET_URL, {
+      // Ne charger que l'utile : moins de détail vers l'horizon, priorité au centre de l'écran,
+      // aucun téléchargement pendant un déplacement rapide, mémoire plafonnée (surtout sur mobile)
+      maximumScreenSpaceError: TACTILE ? 24 : 16,
+      dynamicScreenSpaceError: true,
+      foveatedScreenSpaceError: true,
+      cullRequestsWhileMoving: true,
+      preloadWhenHidden: false,
+      cacheBytes: (TACTILE ? 96 : 256) * 1024 * 1024,
+      maximumCacheOverflowBytes: (TACTILE ? 32 : 128) * 1024 * 1024,
+      shadows: Cesium.ShadowMode.ENABLED
+    });
     scene.primitives.add(tileset);
     tileset.style = new Cesium.Cesium3DTileStyle({ color: `color('${COULEUR}')` });
+    tileset.customShader = ombrage;
     let tuiles = 0;
     tileset.tileLoad.addEventListener(() => { tuiles++; etatBat.textContent = `Bâtiments : ${tuiles} tuiles chargées`; });
+    tileset.tileUnload.addEventListener(() => { tuiles--; etatBat.textContent = `Bâtiments : ${tuiles} tuiles chargées`; });
     etatBat.textContent = "Bâtiments : prêts";
   } catch (e) {
     etatBat.className = "erreur";
@@ -327,90 +522,361 @@
     viewer.terrainProvider = e.target.checked ? reliefIGN : solPlat;
   });
 
-  // ---------- Ombres et heure ----------
+  // ---------- Heure du soleil et ombres ----------
   const curseurHeure = document.getElementById("heure");
+  // Part de l'éclairement qui reste dans l'ombre portée : le ciel seul, comparé à ciel + soleil
+  // sur une surface horizontale (0,45 quand le soleil est à 35°, plus clair quand il est bas).
+  const majObscurite = () => {
+    const soleil = Cesium.Simon1994PlanetaryPositions.computeSunPositionInEarthInertialFrame(viewer.clock.currentTime);
+    const versFixe = Cesium.Transforms.computeIcrfToFixedMatrix(viewer.clock.currentTime) ||
+      Cesium.Transforms.computeTemeToPseudoFixedMatrix(viewer.clock.currentTime);
+    const s = Cesium.Matrix3.multiplyByVector(versFixe, soleil, new Cesium.Cartesian3());
+    const centre = Cesium.Cartesian3.fromDegrees(VUE.lon, VUE.lat);
+    const vertical = Cesium.Ellipsoid.WGS84.geodeticSurfaceNormal(centre, new Cesium.Cartesian3());
+    const sinH = Cesium.Cartesian3.dot(Cesium.Cartesian3.normalize(Cesium.Cartesian3.subtract(s, centre, s), s), vertical);
+    const direct = 0.55 * Math.max(sinH, 0) / Math.sin(Cesium.Math.toRadians(35));
+    const d = Cesium.Math.clamp(0.45 / (0.45 + direct), 0.35, 0.95);
+    viewer.shadowMap.darkness = d;
+    regleUniforme("u_obscurite", d);
+  };
   const regleHeure = () => {
     const h = Number(curseurHeure.value), hh = Math.floor(h), mm = Math.round((h - hh) * 60);
-    document.getElementById("heure-val").textContent = `${hh} h ${mm ? String(mm).padStart(2, "0") : ""}`;
+    document.getElementById("heure-val").textContent = `${hh} h ${String(mm).padStart(2, "0")}`;
     const d = new Date(); d.setHours(hh, mm, 0, 0);
     viewer.clock.currentTime = Cesium.JulianDate.fromDate(d);
     viewer.clock.shouldAnimate = false;
+    majObscurite();
   };
   curseurHeure.addEventListener("input", regleHeure); regleHeure();
   document.getElementById("ombres").addEventListener("change", e => {
     viewer.shadows = e.target.checked;
     if (tileset) tileset.shadows = e.target.checked ? Cesium.ShadowMode.ENABLED : Cesium.ShadowMode.DISABLED;
-    curseurHeure.disabled = !e.target.checked;
+    regleUniforme("u_ombres", e.target.checked ? 1 : 0);
   });
 
-  document.getElementById("vue-ensemble").addEventListener("click", () => allerVueEnsemble(1.5));
-
-  // ---------- Boutons de zoom ----------
-  // distance au sol visé au centre de l'écran (repli : hauteur de la caméra)
-  const distanceAuSol = () => {
-    const centre = new Cesium.Cartesian2(scene.canvas.clientWidth / 2, scene.canvas.clientHeight / 2);
-    const cible = scene.globe.pick(viewer.camera.getPickRay(centre), scene);
-    return cible ? Cesium.Cartesian3.distance(viewer.camera.positionWC, cible) : viewer.camera.positionCartographic.height;
+  // ---------- Navigation (boussole, 2D/3D, zoom, inclinaison, vue initiale) ----------
+  const centreEcran = () => new Cesium.Cartesian2(scene.canvas.clientWidth / 2, scene.canvas.clientHeight / 2);
+  // point du sol visé au centre de l'écran (repli : à la verticale de la caméra)
+  const cibleAuSol = () => {
+    const c = globe.pick(camera.getPickRay(centreEcran()), scene);
+    if (c) return c;
+    const pos = camera.positionCartographic;
+    return Cesium.Cartesian3.fromRadians(pos.longitude, pos.latitude, 0);
   };
-  document.getElementById("zoom-plus").addEventListener("click", () => {
-    const d = distanceAuSol();
-    if (d > 30) viewer.camera.zoomIn(d * 0.5);
-  });
-  document.getElementById("zoom-moins").addEventListener("click", () => {
-    if (viewer.camera.positionCartographic.height < 200000) viewer.camera.zoomOut(distanceAuSol());
-  });
-
-  // ---------- Panneau repliable ----------
-  const panneau = document.getElementById("panneau"), replier = document.getElementById("replier");
-  replier.addEventListener("click", () => {
-    const replie = panneau.classList.toggle("replie");
-    replier.textContent = replie ? "+" : "–";
-    replier.setAttribute("aria-expanded", String(!replie));
-    replier.setAttribute("aria-label", replie ? "Déplier le panneau" : "Replier le panneau");
-  });
-
-  // ---------- Survol et clic ----------
-  let survole = null, choisi = null;
-  const estBatiment = f => f instanceof Cesium.Cesium3DTileFeature;
-  const couleurDe = f => f === choisi ? COULEUR_CHOIX : COULEUR;
-  const handler = new Cesium.ScreenSpaceEventHandler(scene.canvas);
-
-  handler.setInputAction(mvt => {
-    const f = scene.pick(mvt.endPosition);
-    if (survole && survole !== f) { try { survole.color = Cesium.Color.fromCssColorString(couleurDe(survole)); } catch (_) {} survole = null; }
-    if (estBatiment(f) && f !== choisi) { survole = f; f.color = Cesium.Color.fromCssColorString(COULEUR_SURVOL); }
-    scene.canvas.style.cursor = estBatiment(f) ? "pointer" : "";
-  }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
-
-  const fiche = document.getElementById("fiche"), corps = document.getElementById("fiche-corps");
-  const fermerFiche = () => {
-    if (choisi) { try { choisi.color = Cesium.Color.fromCssColorString(COULEUR); } catch (_) {} }
-    choisi = null; fiche.hidden = true;
+  // tourne / incline / rapproche la caméra autour du point visé, comme les boutons IGN
+  const orbiter = ({ cap = camera.heading, inclinaison = camera.pitch, facteur = 1 } = {}) => {
+    const cible = cibleAuSol();
+    const distance = Cesium.Math.clamp(Cesium.Cartesian3.distance(camera.positionWC, cible) * facteur, 40, 200000);
+    camera.flyToBoundingSphere(new Cesium.BoundingSphere(cible, 0), {
+      offset: new Cesium.HeadingPitchRange(cap, Cesium.Math.clamp(inclinaison, Cesium.Math.toRadians(-89.5), Cesium.Math.toRadians(-3)), distance),
+      duration: duree(0.5)
+    });
   };
-  document.getElementById("fermer-fiche").addEventListener("click", fermerFiche);
+  const deg = Cesium.Math.toRadians;
+  document.getElementById("boussole").addEventListener("click", () => orbiter({ cap: 0, inclinaison: deg(-89.5) }));
+  document.getElementById("bascule-3d").addEventListener("click", () =>
+    orbiter({ inclinaison: camera.pitch < deg(-89) ? deg(-40) : deg(-89.5) }));
+  document.getElementById("zoom-plus").addEventListener("click", () => orbiter({ facteur: 0.5 }));
+  document.getElementById("zoom-moins").addEventListener("click", () => orbiter({ facteur: 2 }));
+  document.getElementById("incliner-horizon").addEventListener("click", () => orbiter({ inclinaison: camera.pitch + deg(10) }));
+  document.getElementById("incliner-sol").addEventListener("click", () => orbiter({ inclinaison: camera.pitch - deg(10) }));
+  document.getElementById("vue-initiale").addEventListener("click", () => { fermerFiche(); allerVueEnsemble(duree(1.5)); });
+  const aiguille = document.getElementById("aiguille"), bascule3d = document.getElementById("bascule-3d");
+  let capAffiche = null, mode2d = null;
+  scene.postRender.addEventListener(() => {
+    const cap = Math.round(Cesium.Math.toDegrees(camera.heading) * 2) / 2;
+    if (cap !== capAffiche) { capAffiche = cap; aiguille.setAttribute("transform", `rotate(${-cap} 30 30)`); }
+    const dessus = camera.pitch < deg(-89);
+    if (dessus !== mode2d) { mode2d = dessus; bascule3d.textContent = dessus ? "3D" : "2D"; }
+  });
 
-  handler.setInputAction(clic => {
-    const f = scene.pick(clic.position);
-    if (!estBatiment(f)) { fermerFiche(); return; }
-    if (choisi && choisi !== f) { try { choisi.color = Cesium.Color.fromCssColorString(COULEUR); } catch (_) {} }
-    choisi = f; survole = null;
-    f.color = Cesium.Color.fromCssColorString(COULEUR_CHOIX);
-    corps.innerHTML = "";
-    let titre = "Bâtiment";
-    for (const id of f.getPropertyIds()) {
-      let v = f.getProperty(id);
-      if (v === undefined || v === null || v === "") continue;
-      if (typeof v === "number" && !Number.isInteger(v)) v = v.toFixed(2);
-      if (/cleabs|identifiant/i.test(id) && titre === "Bâtiment") titre = String(v);
-      const tr = document.createElement("tr");
-      const a = document.createElement("td"); a.textContent = id;
-      const b = document.createElement("td"); b.textContent = String(v);
-      tr.append(a, b); corps.append(tr);
+  // ---------- Réglages (⚙) ----------
+  const boutonReglages = document.getElementById("bouton-reglages"), reglages = document.getElementById("reglages");
+  const ouvrirReglages = (ouvert) => { reglages.hidden = !ouvert; boutonReglages.setAttribute("aria-expanded", String(ouvert)); };
+  boutonReglages.addEventListener("click", () => ouvrirReglages(reglages.hidden));
+
+  // ---------- Masquage lointain, fondu et indicateur de chargement ----------
+  const statut = document.getElementById("statut"), statutTexte = document.getElementById("statut-texte");
+  let masque = false, fondu = null;
+  const fondre = (vers) => {
+    if (!tileset) return;
+    cancelAnimationFrame(fondu);
+    const depart = performance.now(), de = vers ? 0 : 1, total = mouvementReduit.matches ? 1 : 400;
+    tileset.show = true;
+    tileset.customShader = ombrageFondu;
+    const pas = (t) => {
+      const k = Math.min(1, (t - depart) / total), o = de + ((vers ? 1 : 0) - de) * k;
+      ombrageFondu.setUniform("u_opacite", o);
+      if (k < 1) { fondu = requestAnimationFrame(pas); return; }
+      ombrageFondu.setUniform("u_opacite", 1);
+      tileset.customShader = ombrage;
+      tileset.show = vers;                     // masqué = plus aucune requête de tuile
+    };
+    fondu = requestAnimationFrame(pas);
+  };
+  let posPrec = null, tPrec = 0;
+  scene.preRender.addEventListener(() => {
+    const h = camera.positionCartographic.height, t = performance.now();
+    // vitesse rapportée à la hauteur : au-delà d'une hauteur par seconde, le déplacement est « rapide »
+    if (posPrec && t > tPrec) {
+      const v = Cesium.Cartesian3.distance(camera.positionWC, posPrec) / ((t - tPrec) / 1000);
+      deplacementRapide = v > Math.max(h, 200) * 1.2;
     }
-    if (!corps.children.length) corps.innerHTML = "<tr><td>Aucun attribut dans les tuiles pour ce bâtiment.</td><td></td></tr>";
-    document.getElementById("fiche-titre").textContent = titre;
-    fiche.hidden = false;
-  }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+    posPrec = Cesium.Cartesian3.clone(camera.positionWC, posPrec); tPrec = t;
+    if (!masque && h > SEUIL_MASQUAGE) { masque = true; fondre(false); }
+    else if (masque && h < SEUIL_MASQUAGE * 0.9) { masque = false; fondre(true); }
+  });
+  // Tuiles affichées à la dernière image : nos tuiles n'ont pas de version simplifiée, donc en vue
+  // éloignée il peut n'y en avoir aucune alors que le territoire est à l'écran.
+  let visiblesEnCours = 0, tuilesVisibles = 0;
+  if (tileset) tileset.tileVisible.addEventListener(() => { visiblesEnCours++; });
+  scene.postRender.addEventListener(() => { tuilesVisibles = visiblesEnCours; visiblesEnCours = 0; });
+  const territoireAEcran = () => tileset && camera.frustum.computeCullingVolume(camera.positionWC, camera.directionWC, camera.upWC)
+    .computeVisibility(tileset.boundingSphere) !== Cesium.Intersect.OUTSIDE;
+  let depuis = 0;
+  setInterval(() => {
+    const batiments = tileset && tileset.show && !tileset.tilesLoaded;
+    const relief = !globe.tilesLoaded || enCours > 0;
+    const occupe = batiments || relief;
+    depuis = occupe ? (depuis || Date.now()) : 0;
+    if (occupe && Date.now() - depuis > 300) {
+      statut.hidden = false; statut.querySelector(".roue").hidden = false;
+      statutTexte.textContent = batiments ? "Chargement des bâtiments…" : "Chargement du relief…";
+    } else if (masque || (tileset && tileset.show && tuilesVisibles === 0 &&
+        camera.positionCartographic.height > 1500 && territoireAEcran())) {
+      statut.hidden = false; statut.querySelector(".roue").hidden = true;
+      statutTexte.textContent = "Zoomez pour afficher les bâtiments";
+    } else statut.hidden = true;
+  }, 250);
+
+  // ---------- Fiche bâtiment ----------
+  const fiche = document.getElementById("fiche");
+  const nombre = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 });
+  const dateLongue = new Intl.DateTimeFormat("fr-FR", { dateStyle: "long", timeZone: "UTC" });
+  const TOITURES = { 1: "tuiles", 2: "ardoises", 3: "zinc ou aluminium", 4: "béton", 9: "autres" };
+  const MURS = { 1: "pierre", 2: "meulière", 3: "béton", 4: "briques", 5: "aggloméré", 6: "bois", 9: "autres" };
+  const vide = v => v === null || v === undefined || v === "" || (typeof v === "number" && !isFinite(v));
+  const parlant = v => !vide(v) && !/^Indifférencié/.test(v);
+  const metres = v => `${nombre.format(v)} m`;
+  const materiaux = (code, table) => {
+    const noms = [...new Set(String(code).split("").map(c => table[c]).filter(Boolean))].join(", ");
+    return noms ? noms.charAt(0).toUpperCase() + noms.slice(1) : null;
+  };
+  const lireDate = v => { const d = new Date(String(v).replace(/^(\d{4}-\d{2}-\d{2})Z$/, "$1")); return isNaN(d) ? null : d; };
+  const date = v => { const d = vide(v) ? null : lireDate(v); return d ? dateLongue.format(d) : null; };
+  // un 1er janvier signifie « année seule »
+  const annee = v => {
+    const d = vide(v) ? null : lireDate(v);
+    return d ? (d.getUTCMonth() === 0 && d.getUTCDate() === 1 ? String(d.getUTCFullYear()) : dateLongue.format(d)) : null;
+  };
+  const plage = (a, b) => vide(a) || vide(b) ? null : Math.abs(b - a) < 0.05 ? metres(a) : `${nombre.format(a)} – ${metres(b)}`;
+  const precision = (m, p) => vide(m) ? null : vide(p) ? m : `${m} (± ${metres(p)})`;
+  const SECTIONS = [
+    { titre: "Caractéristiques", lignes: [
+      ["Nature", p => p.nature], ["Usage principal", p => p.usage_1], ["Usage secondaire", p => p.usage_2],
+      ["Construction légère", p => vide(p.construction_legere) ? null : (p.construction_legere === true || p.construction_legere === 1 || p.construction_legere === "true" ? "Oui" : "Non")],
+      ["État", p => p.etat_de_l_objet]] },
+    { titre: "Matériaux", lignes: [
+      ["Toiture", p => vide(p.materiaux_de_la_toiture) ? null : materiaux(p.materiaux_de_la_toiture, TOITURES)],
+      ["Murs", p => vide(p.materiaux_des_murs) ? null : materiaux(p.materiaux_des_murs, MURS)]] },
+    { titre: "Altitudes", lignes: [
+      ["Sol", p => plage(p.altitude_minimale_sol, p.altitude_maximale_sol)],
+      ["Toit", p => plage(p.altitude_minimale_toit, p.altitude_maximale_toit)]] },
+    { titre: "Dates", lignes: [
+      ["Apparition", p => annee(p.date_d_apparition)], ["Confirmation", p => date(p.date_de_confirmation)],
+      ["Saisie", p => date(p.date_creation)], ["Modification", p => date(p.date_modification)]] },
+    { titre: "Sources", replie: true, lignes: [
+      ["Origine", p => p.origine_du_batiment],
+      ["Planimétrie", p => precision(p.methode_d_acquisition_planimetrique, p.precision_planimetrique)],
+      ["Altimétrie", p => precision(p.methode_d_acquisition_altimetrique, p.precision_altimetrique)],
+      ["Fichiers fonciers", p => p.appariement_fichiers_fonciers]] }
+  ];
+  const el = (balise, classe, texte) => {
+    const e = document.createElement(balise);
+    if (classe) e.className = classe;
+    if (texte !== undefined) e.textContent = texte;
+    return e;
+  };
+  const section = (titre, contenu, replie) => {
+    const d = el("details", "section"); d.open = !replie;
+    d.append(el("summary", null, titre), contenu); return d;
+  };
+  const lignes = (paires, classe = "lignes") => {
+    const dl = el("dl", classe);
+    for (const [nom, val] of paires) if (!vide(val)) dl.append(el("dt", null, nom), el("dd", null, String(val)));
+    return dl.childElementCount ? dl : null;
+  };
+  const boutonCopier = (texte) => {
+    const b = el("button", "copier", "Copier"); b.type = "button"; b.title = "Copier l'identifiant";
+    b.addEventListener("click", () => navigator.clipboard?.writeText(texte).then(() => {
+      b.textContent = "Copié"; setTimeout(() => { b.textContent = "Copier"; }, 1500);
+    }));
+    return b;
+  };
+  const identifiants = (p) => {
+    const dl = el("dl", "lignes");
+    const ajoute = (nom, valeur, lien) => {
+      const dd = el("dd"), v = el(lien ? "a" : "span", "ident", valeur);
+      if (lien) Object.assign(v, { href: lien, target: "_blank", rel: "noopener noreferrer" });
+      dd.append(v, boutonCopier(valeur)); dl.append(el("dt", null, nom), dd);
+    };
+    if (!vide(p.cleabs)) ajoute("Identifiant", String(p.cleabs));
+    if (!vide(p.identifiants_rnb)) for (const id of String(p.identifiants_rnb).split("/").map(s => s.trim()).filter(Boolean))
+      ajoute("RNB", id, `https://rnb.beta.gouv.fr/carte?q=${encodeURIComponent(id)}`);
+    return dl.childElementCount ? dl : null;
+  };
+  const afficherCarte = (titre, sousTitre, contenus) => {
+    const entete = el("header", "fiche-entete"), bloc = el("div");
+    bloc.append(el("h2", "fiche-titre", titre));
+    if (sousTitre) bloc.append(el("p", "fiche-sous-titre", sousTitre));
+    const fermer = el("button", "fermer", "×");
+    Object.assign(fermer, { type: "button", title: "Fermer" }); fermer.setAttribute("aria-label", "Fermer");
+    fermer.addEventListener("click", fermerFiche);
+    entete.append(bloc, fermer);
+    const corps = el("div", "fiche-corps"); corps.append(...contenus);
+    fiche.replaceChildren(entete, corps); fiche.hidden = false;
+  };
+  const proprietes = (f) => {
+    const p = {};
+    for (const id of f.getPropertyIds()) p[id] = f.getProperty(id);
+    return p;
+  };
+  const afficherBatiment = (p) => {
+    const titre = parlant(p.usage_1) ? p.usage_1 : parlant(p.nature) ? p.nature : "Bâtiment";
+    const apparu = annee(p.date_d_apparition);
+    const sousTitre = [titre !== p.nature && parlant(p.nature) ? p.nature : null,
+      apparu ? `apparu ${/^\d+$/.test(apparu) ? "en" : "le"} ${apparu}` : null].filter(Boolean).join(" · ");
+    const chiffres = el("div", "chiffres");
+    for (const [nom, val] of [["Hauteur", vide(p.hauteur) ? null : metres(p.hauteur)],
+      ["Étages", vide(p.nombre_d_etages) || p.nombre_d_etages === 0 ? null : String(p.nombre_d_etages)],
+      ["Logements", vide(p.nombre_de_logements) ? null : String(p.nombre_de_logements)]]) {
+      const c = el("div", "chiffre"); c.append(el("b", null, val ?? "—"), el("span", null, nom)); chiffres.append(c);
+    }
+    const blocs = [chiffres];
+    for (const s of SECTIONS) { const l = lignes(s.lignes.map(([n, f]) => [n, f(p)])); if (l) blocs.push(section(s.titre, l, s.replie)); }
+    const ids = identifiants(p); if (ids) blocs.push(section("Identifiants", ids, false));
+    const brutes = lignes(Object.entries(p), "lignes brutes"); if (brutes) blocs.push(section("Toutes les propriétés", brutes, true));
+    afficherCarte(titre, sousTitre, blocs);
+  };
+
+  // ---------- Sélection au toucher / clic (pas d'effet au survol, comme l'IGN) ----------
+  let choisi = null;
+  const estBatiment = f => f instanceof Cesium.Cesium3DTileFeature;
+  const colorer = (f, c) => { try { f.color = Cesium.Color.fromCssColorString(c); } catch (_) {} };
+  function fermerFiche() {
+    if (choisi) colorer(choisi, COULEUR);
+    choisi = null; fiche.hidden = true; fiche.replaceChildren();
+  }
+  document.addEventListener("keydown", e => {
+    if (e.key !== "Escape") return;
+    if (!reglages.hidden) ouvrirReglages(false);
+    else if (!fiche.hidden) fermerFiche();
+  });
+  // Sur téléphone, si le bâtiment touché est caché par la feuille du bas, on remonte la vue
+  const degagerSousFeuille = (x, y) => {
+    if (!matchMedia("(max-width: 640px)").matches) return;
+    const haut = fiche.offsetTop;
+    if (y < haut - 24) return;
+    // déplace la caméra du sol visible à mi-hauteur de la zone dégagée vers le sol sous le bâtiment
+    const ici = globe.pick(camera.getPickRay(new Cesium.Cartesian2(x, y)), scene);
+    const cible = globe.pick(camera.getPickRay(new Cesium.Cartesian2(x, haut / 2)), scene);
+    if (!ici || !cible) return;
+    const decal = Cesium.Cartesian3.subtract(ici, cible, new Cesium.Cartesian3());
+    camera.flyTo({
+      destination: Cesium.Cartesian3.add(camera.positionWC, decal, new Cesium.Cartesian3()),
+      orientation: { heading: camera.heading, pitch: camera.pitch, roll: camera.roll }, duration: duree(0.4)
+    });
+  };
+  const selectionner = (x, y) => {
+    const f = scene.pick(new Cesium.Cartesian2(x, y));
+    if (!estBatiment(f)) { fermerFiche(); return; }
+    if (choisi && choisi !== f) colorer(choisi, COULEUR);
+    choisi = f; colorer(f, COULEUR_CHOIX);
+    afficherBatiment(proprietes(f));
+    degagerSousFeuille(x, y);
+  };
+  // Un « tap » : appui court (< 400 ms) sans glisser (5 px à la souris, 12 px au doigt)
+  let appui = null;
+  scene.canvas.addEventListener("pointerdown", e => { appui = e.isPrimary && e.button === 0 ? { t: Date.now(), x: e.clientX, y: e.clientY } : null; });
+  scene.canvas.addEventListener("pointercancel", () => { appui = null; });
+  scene.canvas.addEventListener("pointerup", e => {
+    if (!appui || !e.isPrimary) return;
+    const d = Math.hypot(e.clientX - appui.x, e.clientY - appui.y);
+    if (Date.now() - appui.t < 400 && d < (e.pointerType === "mouse" ? 5 : 12)) {
+      const r = scene.canvas.getBoundingClientRect();
+      if (!reglages.hidden) ouvrirReglages(false);
+      selectionner(e.clientX - r.left, e.clientY - r.top);
+    }
+    appui = null;
+  });
+
+  // ---------- Recherche de lieu (géocodage Géoplateforme, sans clé) ----------
+  const champ = document.getElementById("lieu"), liste = document.getElementById("suggestions");
+  const formulaire = champ.form;
+  let resultats = [], actif = -1, minuterie = null, numRecherche = 0;
+  const viderListe = () => { liste.replaceChildren(); resultats = []; actif = -1; champ.setAttribute("aria-expanded", "false"); };
+  const surligner = (texte, requete) => {
+    const p = el("p"), i = texte.toUpperCase().indexOf(requete.toUpperCase());
+    if (i < 0) { p.textContent = texte; return p; }
+    p.append(texte.slice(0, i), el("strong", null, texte.slice(i, i + requete.length)), texte.slice(i + requete.length));
+    return p;
+  };
+  const marquerActif = (i) => {
+    const items = liste.querySelectorAll(".suggestion[data-i]");
+    if (!items.length) return;
+    actif = (i + items.length) % items.length;
+    items.forEach((x, k) => { x.classList.toggle("actif", k === actif); x.setAttribute("aria-selected", String(k === actif)); });
+    items[actif].scrollIntoView({ block: "nearest" });
+  };
+  const allerAuLieu = (r) => {
+    viderListe(); champ.value = r.fulltext; champ.blur(); fermerFiche();
+    const carto = Cesium.Cartographic.fromDegrees(r.x, r.y);
+    const sol = globe.getHeight(carto) || 0;
+    camera.flyToBoundingSphere(new Cesium.BoundingSphere(Cesium.Cartesian3.fromDegrees(r.x, r.y, sol), 0), {
+      offset: new Cesium.HeadingPitchRange(deg(8), deg(-32), 500), duration: duree(2)
+    });
+  };
+  const chercher = async (requete) => {
+    const num = ++numRecherche;
+    let rep;
+    try {
+      rep = await (await fetch("https://data.geopf.fr/geocodage/completion?type=StreetAddress,PositionOfInterest" +
+        `&maximumResponses=15&lonlat=${VUE.lon},${VUE.lat}&text=${encodeURIComponent(requete)}`)).json();
+    } catch (_) { rep = null; }
+    if (num !== numRecherche || champ.value.trim() !== requete) return;
+    const vus = new Set();
+    resultats = (rep?.results || []).filter(r => !/[<>]/.test(r.fulltext) && !vus.has(r.fulltext) && vus.add(r.fulltext));
+    liste.replaceChildren();
+    if (!resultats.length) {
+      liste.append(Object.assign(el("div", "suggestion vide"), { textContent: rep ? "Aucun lieu trouvé" : "Recherche indisponible" }));
+    }
+    resultats.forEach((r, i) => {
+      const d = el("div", "suggestion"); d.dataset.i = i; d.setAttribute("role", "option");
+      d.append(surligner(r.fulltext, requete));
+      d.addEventListener("pointerdown", e => e.preventDefault());
+      d.addEventListener("click", () => allerAuLieu(r));
+      liste.append(d);
+    });
+    actif = -1; champ.setAttribute("aria-expanded", "true");
+  };
+  champ.addEventListener("input", () => {
+    clearTimeout(minuterie);
+    const q = champ.value.trim();
+    if (q.length < 3) { numRecherche++; viderListe(); return; }
+    minuterie = setTimeout(() => chercher(q), 250);
+  });
+  champ.addEventListener("keydown", e => {
+    if (e.key === "ArrowDown") { e.preventDefault(); marquerActif(actif + 1); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); marquerActif(actif - 1); }
+    else if (e.key === "Escape") { e.stopPropagation(); viderListe(); champ.blur(); }
+  });
+  formulaire.addEventListener("submit", e => {
+    e.preventDefault();
+    const r = resultats[actif >= 0 ? actif : 0];
+    if (r) allerAuLieu(r);
+  });
+  champ.addEventListener("blur", () => setTimeout(() => { if (document.activeElement !== champ) viderListe(); }, 150));
+  document.getElementById("effacer").addEventListener("click", () => { champ.value = ""; viderListe(); champ.focus(); });
 
   // ---------- Contrôle altimétrique (clic droit) ----------
   // sampleTerrainMostDetailed est inutilisable ici : le relief personnalisé n'expose pas de
@@ -424,29 +890,23 @@
     const v = id ? Number(f.getProperty(id)) : NaN;
     return isFinite(v) && Math.abs(v) < 1e6 ? { id, v } : null;
   };
-  const afficherControle = (lignes, titre) => {
-    fermerFiche();
-    corps.innerHTML = "";
-    for (const [nom, val] of lignes) {
-      const tr = document.createElement("tr");
-      const a = document.createElement("td"); a.textContent = nom;
-      const b = document.createElement("td"); b.textContent = val;
-      tr.append(a, b); corps.append(tr);
-    }
-    document.getElementById("fiche-titre").textContent = titre;
-    fiche.hidden = false;
+  const afficherControle = (paires) => {
+    if (choisi) colorer(choisi, COULEUR);
+    choisi = null;
+    afficherCarte("Contrôle altimétrique", "Sol affiché comparé à l’altitude IGN", [lignes(paires) || el("p", null, "—")]);
   };
   let numControle = 0;
+  const handler = new Cesium.ScreenSpaceEventHandler(scene.canvas);
   handler.setInputAction(async clic => {
     const num = ++numControle;
-    const sol = scene.globe.pick(viewer.camera.getPickRay(clic.position), scene);
-    if (!sol) { afficherControle([["Position", "hors du sol"]], "Contrôle altimétrique"); return; }
+    const sol = globe.pick(camera.getPickRay(clic.position), scene);
+    if (!sol) { afficherControle([["Position", "hors du sol"]]); return; }
     const c = Cesium.Cartographic.fromCartesian(sol);
     const lon = Cesium.Math.toDegrees(c.longitude), lat = Cesium.Math.toDegrees(c.latitude);
-    const solAffiche = scene.globe.getHeight(c);
+    const solAffiche = globe.getHeight(c);
     const f = scene.pick(clic.position), base = estBatiment(f) ? altitudeBase(f) : null;
     const decalage = Number(curseurH.value);
-    const lignes = (ign) => {
+    const paires = (ign) => {
       const l = [
         ["Position", `${lat.toFixed(5)}, ${lon.toFixed(5)}`],
         ["Sol affiché (relief chargé)", m(solAffiche)],
@@ -464,7 +924,7 @@
       }
       return l;
     };
-    afficherControle(lignes(undefined), "Contrôle altimétrique");
+    afficherControle(paires(undefined));
     let ign = null;
     try {
       const rep = await fetch("https://data.geopf.fr/altimetrie/1.0/calcul/alti/rest/elevation.json" +
@@ -472,7 +932,7 @@
       const z = (await rep.json()).elevations[0];
       ign = z > NODATA ? z : null;
     } catch (_) { ign = null; }
-    if (num === numControle) afficherControle(lignes(ign), "Contrôle altimétrique");
+    if (num === numControle) afficherControle(paires(ign));
   }, Cesium.ScreenSpaceEventType.RIGHT_CLICK);
 })();
 </script>
