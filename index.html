@@ -262,6 +262,7 @@
     <div class="segments" role="group" aria-label="Fond de carte">
       <button type="button" data-fond="ortho" aria-pressed="true">Photo aérienne</button>
       <button type="button" data-fond="plan" aria-pressed="false">Plan</button>
+      <button type="button" data-fond="lidar" aria-pressed="false">Relief LiDAR</button>
     </div>
   </div>
   <div class="reglage">
@@ -272,6 +273,10 @@
     <label class="interrupteur">Ombres du soleil <input type="checkbox" id="ombres" checked></label>
   </div>
   <div class="reglage">
+    <label class="interrupteur">Toits en photo aérienne <input type="checkbox" id="toits-photo"></label>
+    <div class="aide">Expérimental : l’orthophoto IGN est projetée sur les toits autour de la zone visée.</div>
+  </div>
+  <div class="reglage">
     <label class="nom" for="decalage">Hauteur des bâtiments <output id="decalage-val">0 m</output></label>
     <input type="range" id="decalage" min="-60" max="60" step="0.5" value="0">
     <div class="aide">À utiliser si les bâtiments s’enfoncent ou flottent au-dessus du sol.</div>
@@ -279,6 +284,7 @@
   <div class="etat" aria-live="polite">
     <p id="etat-batiments">Bâtiments : chargement…</p>
     <p id="etat-relief">Relief : en attente</p>
+    <p id="etat-toits" hidden></p>
     <p>Clic droit : contrôle de l’altitude du sol sous le curseur.</p>
   </div>
 </section>
@@ -313,13 +319,15 @@
   const duree = s => mouvementReduit.matches ? 0 : s;
 
   // ---------- Fonds IGN (Géoplateforme, sans clé) ----------
-  const fondIGN = (couche, format) => new Cesium.WebMapTileServiceImageryProvider({
+  const fondIGN = (couche, format, tileMatrixSetID = "PM", maximumLevel = 19) => new Cesium.WebMapTileServiceImageryProvider({
     url: "https://data.geopf.fr/wmts", layer: couche, style: "normal", format,
-    tileMatrixSetID: "PM", maximumLevel: 19, credit: new Cesium.Credit("© IGN")
+    tileMatrixSetID, maximumLevel, credit: new Cesium.Credit("© IGN")
   });
   const fonds = {
     ortho: () => fondIGN("ORTHOIMAGERY.ORTHOPHOTOS", "image/jpeg"),
-    plan: () => fondIGN("GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2", "image/png")
+    plan: () => fondIGN("GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2", "image/png"),
+    // Estompage du MNT LiDAR HD : publié jusqu'au niveau 18 seulement (jeu de tuiles PM_0_18)
+    lidar: () => fondIGN("IGNF_LIDAR-HD_MNT_ELEVATION.ELEVATIONGRIDCOVERAGE.SHADOW", "image/png", "PM_0_18", 18)
   };
 
   // ---------- Relief IGN (RGE ALTI, altitudes NGF, comme les bâtiments) ----------
@@ -428,7 +436,20 @@
   // ensuite par Cesium : la couleur de sélection reste donc éclairée normalement.
   // Cesium assombrit encore les faces à contre-jour (ombrage « normal » de la carte d'ombres) :
   // on divise par ce facteur pour retrouver le même éclairage que sans ombres.
+  // Option « toits en photo » : chaque emprise d'orthophoto fournit un repère local normalisé
+  // (u_versLocal : coordonnées caméra → repère ENU / demi-largeur) et un polynôme du 2e degré
+  // (u_coefU/V) qui donne la position dans l'image Web Mercator. Deux textures par emprise (slot)
+  // pour basculer sans à-coup. Renvoie la couleur et la part couverte (fondu près du bord).
   const SOURCE_OMBRAGE = `
+    vec4 photoEmprise(sampler2D a, sampler2D b, float slot, mat4 versLocal, mat3 cu, mat3 cv, vec3 p) {
+      vec3 q = (versLocal * vec4(p, 1.0)).xyz;
+      vec3 f1 = vec3(1.0, q.x, q.y), f2 = vec3(q.x * q.x, q.x * q.y, q.y * q.y), f3 = q.z * f1;
+      vec2 uv = vec2(dot(cu[0], f1) + dot(cu[1], f2) + dot(cu[2], f3),
+                     dot(cv[0], f1) + dot(cv[1], f2) + dot(cv[2], f3));
+      vec3 c = slot < 0.5 ? texture(a, uv).rgb : texture(b, uv).rgb;
+      vec2 bord = min(uv, 1.0 - uv);
+      return vec4(c, smoothstep(0.0, 0.02, min(bord.x, bord.y)));
+    }
     void fragmentMain(FragmentInput fsInput, inout czm_modelMaterial material) {
       vec3 p = fsInput.attributes.positionEC;
       vec3 n = normalize(cross(dFdx(p), dFdy(p)));
@@ -444,6 +465,19 @@
       vec3 e = (ciel + soleil)
         * mix(vec3(1.0), vec3(0.91, 0.92, 0.94), toit)
         * mix(1.0, 0.6, dessous);
+      if (u_photo > 0.5) {
+        vec4 fin = photoEmprise(u_photo00, u_photo01, u_slot0, u_versLocal0, u_coefU0, u_coefV0, p);
+        vec4 large = photoEmprise(u_photo10, u_photo11, u_slot1, u_versLocal1, u_coefU1, u_coefV1, p);
+        fin.a *= u_pret0; large.a *= u_pret1;
+        float part = smoothstep(0.3, 0.42, verticalite) * max(fin.a, large.a);   // pans jusqu'à ~70°
+        vec3 photo = mix(large.rgb, fin.rgb, fin.a);
+        // La photo porte déjà l'éclairage du jour : on ne nuance les pans que par rapport à un toit plat
+        vec3 plat = (vec3(0.791, 0.855, 1.0) * 0.528 + vec3(1.0, 0.922, 0.823) * 1.03 * max(dot(haut, l), 0.0) * jour)
+          * vec3(0.91, 0.92, 0.94);
+        float nuance = clamp(dot(e, vec3(1.0)) / max(dot(plat, vec3(1.0)), 0.15), 0.55, 1.3);
+        // Cesium repasse ensuite en sRGB puis multiplie par la couleur du style : on les compense
+        e = mix(e, czm_srgbToLinear(clamp(photo * mix(1.0, nuance, 0.6) / u_teinte, 0.0, 1.0)), part);
+      }
       if (u_ombres > 0.5) {
         float s = clamp(dot(normalize(fsInput.attributes.normalEC), l) / 0.05, 0.0, 1.0); // normalShadingSmooth
         e /= max(s, u_obscurite);
@@ -451,11 +485,27 @@
       material.diffuse = e;
       material.alpha = u_opacite;
     }`;
-  const uniformes = () => ({
-    u_ombres: { type: Cesium.UniformType.FLOAT, value: 1 },
-    u_obscurite: { type: Cesium.UniformType.FLOAT, value: 0.45 },
-    u_opacite: { type: Cesium.UniformType.FLOAT, value: 1 }
-  });
+  const unPixel = () => new Cesium.TextureUniform({ typedArray: new Uint8Array([128, 128, 128, 255]), width: 1, height: 1 });
+  const teinte = Cesium.Color.fromCssColorString(COULEUR);
+  const uniformes = () => {
+    const u = {
+      u_ombres: { type: Cesium.UniformType.FLOAT, value: 1 },
+      u_obscurite: { type: Cesium.UniformType.FLOAT, value: 0.45 },
+      u_opacite: { type: Cesium.UniformType.FLOAT, value: 1 },
+      u_photo: { type: Cesium.UniformType.FLOAT, value: 0 },
+      u_teinte: { type: Cesium.UniformType.VEC3, value: new Cesium.Cartesian3(teinte.red, teinte.green, teinte.blue) }
+    };
+    for (const i of [0, 1]) {
+      u[`u_photo${i}0`] = { type: Cesium.UniformType.SAMPLER_2D, value: unPixel() };
+      u[`u_photo${i}1`] = { type: Cesium.UniformType.SAMPLER_2D, value: unPixel() };
+      u[`u_slot${i}`] = { type: Cesium.UniformType.FLOAT, value: 0 };
+      u[`u_pret${i}`] = { type: Cesium.UniformType.FLOAT, value: 0 };
+      u[`u_versLocal${i}`] = { type: Cesium.UniformType.MAT4, value: Cesium.Matrix4.clone(Cesium.Matrix4.IDENTITY) };
+      u[`u_coefU${i}`] = { type: Cesium.UniformType.MAT3, value: Cesium.Matrix3.clone(Cesium.Matrix3.ZERO) };
+      u[`u_coefV${i}`] = { type: Cesium.UniformType.MAT3, value: Cesium.Matrix3.clone(Cesium.Matrix3.ZERO) };
+    }
+    return u;
+  };
   const ombrage = new Cesium.CustomShader({
     lightingModel: Cesium.LightingModel.UNLIT, translucencyMode: Cesium.CustomShaderTranslucencyMode.OPAQUE,
     uniforms: uniformes(), fragmentShaderText: SOURCE_OMBRAGE
@@ -648,6 +698,177 @@
       statutTexte.textContent = "Zoomez pour afficher les bâtiments";
     } else statut.hidden = true;
   }, 250);
+
+  // ---------- Toits en photo aérienne (option expérimentale) ----------
+  // L'image est assemblée à partir des MÊMES dalles WMTS que le fond « Photo aérienne » (PM, niveau
+  // ≤ 19, soit ~20 cm ici) : les toits reçoivent exactement les pixels du sol. Deux emprises calées
+  // sur la grille des dalles, centrées sur la zone visée : « fine » et « large » (4 fois plus étendue).
+  // Calage : pour chaque pixel, position caméra (précise) → repère local ENU de l'emprise, matrice
+  // calculée en double à chaque image → position Web Mercator dans l'image, par un polynôme ajusté
+  // sur des points convertis exactement (écart affiché dans l'état, de l'ordre du millimètre).
+  // Une nouvelle image ne remplace l'ancienne, avec ses paramètres, qu'une fois créée sur la carte
+  // graphique : une image n'est jamais appliquée avec les paramètres d'une autre.
+  // Limite propre à la donnée : l'orthophoto IGN n'est pas une « vraie ortho », le toit d'un bâtiment
+  // haut y apparaît légèrement déporté (dévers), d'autant plus loin du centre du cliché.
+  const PHOTO = { dalles: TACTILE ? 8 : 12, niveauMax: 19, niveauMin: 13, requetes: 6 };
+  const DEMI_TOUR = Math.PI * 6378137;       // demi-largeur du monde en Web Mercator (EPSG:3857)
+  const projMerc = new Cesium.WebMercatorProjection();
+  const etatToits = document.getElementById("etat-toits");
+  const emprises = [0, 1].map(i => ({ i, voulue: null, active: null, attente: null, generation: 0 }));
+  let photoActive = false;
+
+  // emprise de n × n dalles au niveau z, calée sur la grille, centrée au plus près de la cible
+  const empriseVoulue = (i, cible, distance) => {
+    const c = Cesium.Cartographic.fromCartesian(cible);
+    const solZ0 = 2 * DEMI_TOUR * Math.cos(c.latitude);          // largeur au sol d'une dalle de niveau 0
+    const n = PHOTO.dalles;
+    // l'emprise fine couvre ~2,4 fois la distance de la caméra à la cible
+    const zFin = Math.floor(Math.log2(n * solZ0 / (2.4 * Math.max(distance, 60))));
+    const z = Cesium.Math.clamp(Cesium.Math.clamp(zFin, PHOTO.niveauMin, PHOTO.niveauMax) - 2 * i, PHOTO.niveauMin - 2, PHOTO.niveauMax);
+    const m = projMerc.project(c), cote = 2 * DEMI_TOUR / 2 ** z;
+    return { z, x0: Math.round((m.x + DEMI_TOUR) / cote - n / 2), y0: Math.round((DEMI_TOUR - m.y) / cote - n / 2) };
+  };
+  const memeEmprise = (a, b) => a && b && a.z === b.z &&
+    Math.abs(a.x0 - b.x0) <= PHOTO.dalles / 4 && Math.abs(a.y0 - b.y0) <= PHOTO.dalles / 4;
+
+  // Repère local et polynôme : (x, y) = ENU / L, z = hauteur / L, avec L la demi-largeur au sol
+  const calage = ({ z, x0, y0 }) => {
+    const n = PHOTO.dalles, cote = 2 * DEMI_TOUR / 2 ** z;
+    const ouest = x0 * cote - DEMI_TOUR, nord = DEMI_TOUR - y0 * cote, larg = n * cote;
+    const centre = projMerc.unproject(new Cesium.Cartesian3(ouest + larg / 2, nord - larg / 2, 0));
+    centre.height = 0;
+    const L = larg / 2 * Math.cos(centre.latitude);
+    const enu = Cesium.Transforms.eastNorthUpToFixedFrame(Cesium.Cartographic.toCartesian(centre));
+    const base = Cesium.Matrix4.multiply(Cesium.Matrix4.fromUniformScale(1 / L),
+      Cesium.Matrix4.inverseTransformation(enu, new Cesium.Matrix4()), new Cesium.Matrix4());
+    // moindres carrés sur une grille débordant de l'emprise, de -80 à +320 m de hauteur
+    const F = [], U = [], V = [], loc = new Cesium.Cartesian3(), pt = new Cesium.Cartesian3(), carto = new Cesium.Cartographic();
+    for (let a = -6; a <= 6; a++) for (let b = -6; b <= 6; b++) for (const h of [-80, 120, 320]) {
+      const x = a / 6 * 1.3, y = b / 6 * 1.3, q = h / L;
+      Cesium.Matrix4.multiplyByPoint(enu, Cesium.Cartesian3.fromElements(x * L, y * L, h, loc), pt);
+      const m = projMerc.project(Cesium.Ellipsoid.WGS84.cartesianToCartographic(pt, carto));
+      F.push([1, x, y, x * x, x * y, y * y, q, q * x, q * y]);
+      U.push((m.x - ouest) / larg); V.push((m.y - (nord - larg)) / larg);
+    }
+    const resoudre = (Y) => {                  // équations normales 9 × 9, pivot de Gauss
+      const A = Array.from({ length: 9 }, (_, r) => Array.from({ length: 10 }, (_, c) =>
+        F.reduce((s, f, k) => s + f[r] * (c < 9 ? f[c] : Y[k]), 0)));
+      for (let c = 0; c < 9; c++) {
+        let p = c; for (let r = c + 1; r < 9; r++) if (Math.abs(A[r][c]) > Math.abs(A[p][c])) p = r;
+        [A[c], A[p]] = [A[p], A[c]];
+        for (let r = 0; r < 9; r++) if (r !== c) { const k = A[r][c] / A[c][c]; for (let j = c; j < 10; j++) A[r][j] -= k * A[c][j]; }
+      }
+      return A.map((ligne, r) => ligne[9] / ligne[r]);
+    };
+    const cu = resoudre(U), cv = resoudre(V);
+    const ecartMax = Math.max(...F.map((f, k) => Math.hypot(
+      f.reduce((s, v, j) => s + v * cu[j], 0) - U[k], f.reduce((s, v, j) => s + v * cv[j], 0) - V[k]))) * 2 * L;
+    return { base, cu: Cesium.Matrix3.fromColumnMajorArray(cu), cv: Cesium.Matrix3.fromColumnMajorArray(cv),
+      ecartMax, resolution: 2 * L / (n * 256) };
+  };
+
+  // même URL, au caractère près, que celle demandée par Cesium pour le fond : réutilise le cache du navigateur
+  const urlDalle = (z, x, y) => `https://data.geopf.fr/wmts?tilematrix=${z}&layer=ORTHOIMAGERY.ORTHOPHOTOS&style=normal` +
+    `&tilerow=${y}&tilecol=${x}&tilematrixset=PM&format=image%2Fjpeg&service=WMTS&version=1.0.0&request=GetTile`;
+  const majEtatToits = () => {
+    etatToits.hidden = !photoActive;
+    const [fin, large] = emprises.map(e => e.active);
+    const charge = emprises.some(e => e.attente || (e.voulue && e.voulue !== (e.active && e.active.voulue)));
+    const cm = e => e ? `${Math.round(e.cal.resolution * 100)} cm` : "—";
+    const mm = fin ? Math.max(fin.cal.ecartMax, large ? large.cal.ecartMax : 0) * 1000 : null;
+    etatToits.textContent = `Toits : photo ${cm(fin)} / ${cm(large)}` +
+      (fin ? ` · écart de calage ${mm < 1 ? "< 1" : Math.round(mm)} mm` : "") +
+      (charge ? " · chargement…" : "");
+  };
+
+  const chargerEmprise = async (emp, voulue) => {
+    const gen = ++emp.generation, n = PHOTO.dalles;
+    emp.voulue = voulue; majEtatToits();
+    const toile = document.createElement("canvas"); toile.width = toile.height = n * 256;
+    const ctx = toile.getContext("2d");
+    ctx.fillStyle = "#808080"; ctx.fillRect(0, 0, toile.width, toile.height);
+    const file = [];
+    for (let dy = 0; dy < n; dy++) for (let dx = 0; dx < n; dx++) file.push([dx, dy]);
+    // les dalles les plus centrales d'abord (les plus utiles si l'emprise change en route)
+    file.sort((a, b) => Math.hypot(a[0] - n / 2 + 0.5, a[1] - n / 2 + 0.5) - Math.hypot(b[0] - n / 2 + 0.5, b[1] - n / 2 + 0.5));
+    const ouvrier = async () => {
+      while (file.length && gen === emp.generation && photoActive) {
+        const [dx, dy] = file.shift();
+        try {
+          const img = await createImageBitmap(new Blob([await telechargerDalle(urlDalle(voulue.z, voulue.x0 + dx, voulue.y0 + dy))]));
+          ctx.drawImage(img, dx * 256, dy * 256); img.close();
+        } catch (_) { /* dalle absente : reste grise */ }
+      }
+    };
+    await Promise.all(Array.from({ length: PHOTO.requetes / 2 }, ouvrier));
+    if (gen !== emp.generation || !photoActive) return;
+    const blob = await new Promise(r => toile.toBlob(r, "image/jpeg", 0.95));
+    // une seule texture en cours de création par emprise : sinon une image pourrait être prise
+    // pour une autre lors de la bascule
+    while (emp.attente && gen === emp.generation) await attendre(100);
+    if (gen !== emp.generation || !photoActive || !blob) return;
+    const slot = emp.active ? 1 - emp.active.slot : 0, nom = `u_photo${emp.i}${slot}`;
+    const url = URL.createObjectURL(blob);
+    emp.attente = { slot, nom, url, voulue, cal: calage(voulue), avant: ombrage._textureManager.getTexture(nom) };
+    ombrage.setUniform(nom, new Cesium.TextureUniform({
+      url, repeat: false, maximumAnisotropy: 8,
+      minificationFilter: Cesium.TextureMinificationFilter.LINEAR_MIPMAP_LINEAR,
+      magnificationFilter: Cesium.TextureMagnificationFilter.LINEAR
+    }));
+  };
+
+  // Bascule une fois la texture réellement créée (TextureManager, mis à jour pendant le rendu)
+  scene.postRender.addEventListener(() => {
+    for (const emp of emprises) {
+      const a = emp.attente;
+      if (!a) continue;
+      const tex = ombrage._textureManager.getTexture(a.nom);
+      // la photo fait n × 256 px : ne pas confondre avec le pixel gris de départ, créé lui aussi en différé
+      const echec = tex === scene.context.defaultTexture;
+      if (!tex || tex === a.avant || (!echec && tex.width !== PHOTO.dalles * 256)) continue;
+      URL.revokeObjectURL(a.url); emp.attente = null;
+      if (a.abandon) { ombrage.setUniform(a.nom, unPixel()); continue; }      // option coupée entre-temps
+      if (echec) { emp.voulue = emp.active && emp.active.voulue; majEtatToits(); continue; }
+      const ancien = emp.active;
+      emp.active = a;
+      ombrage.setUniform(`u_slot${emp.i}`, a.slot);
+      ombrage.setUniform(`u_coefU${emp.i}`, a.cal.cu);
+      ombrage.setUniform(`u_coefV${emp.i}`, a.cal.cv);
+      ombrage.setUniform(`u_pret${emp.i}`, 1);
+      if (ancien) ombrage.setUniform(ancien.nom, unPixel());     // libère la mémoire graphique
+      majEtatToits();
+    }
+  });
+  // Repère local à jour pour la caméra de l'image qui va être rendue (calcul en double)
+  const versLocal = new Cesium.Matrix4();
+  scene.preRender.addEventListener(() => {
+    if (!photoActive) return;
+    for (const emp of emprises) if (emp.active)
+      ombrage.setUniform(`u_versLocal${emp.i}`, Cesium.Matrix4.multiply(emp.active.cal.base, camera.inverseViewMatrix, versLocal));
+  });
+  setInterval(() => {
+    if (!photoActive || !tileset || masque || deplacementRapide) return;
+    const cible = cibleAuSol(), distance = Cesium.Cartesian3.distance(camera.positionWC, cible);
+    for (const emp of emprises) {
+      const v = empriseVoulue(emp.i, cible, distance);
+      if (!memeEmprise(v, emp.voulue)) chargerEmprise(emp, v);
+    }
+  }, 400);
+
+  document.getElementById("toits-photo").addEventListener("change", e => {
+    photoActive = e.target.checked;
+    ombrage.setUniform("u_photo", photoActive ? 1 : 0);
+    if (!photoActive) for (const emp of emprises) {
+      emp.generation++;
+      ombrage.setUniform(`u_pret${emp.i}`, 0);
+      if (emp.active) ombrage.setUniform(emp.active.nom, unPixel());
+      // une texture encore en création est libérée à son arrivée (voir la bascule)
+      if (emp.attente) emp.attente.abandon = true;
+      emp.voulue = emp.active = null;
+    }
+    majEtatToits();
+  });
+  if (window.__v) window.__v.emprises = emprises;
 
   // ---------- Fiche bâtiment ----------
   const fiche = document.getElementById("fiche");
