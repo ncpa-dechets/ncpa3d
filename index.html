@@ -273,8 +273,8 @@
     <label class="interrupteur">Ombres du soleil <input type="checkbox" id="ombres" checked></label>
   </div>
   <div class="reglage">
-    <label class="interrupteur">Toits en photo aérienne <input type="checkbox" id="toits-photo"></label>
-    <div class="aide">Expérimental : l’orthophoto IGN est projetée sur les toits autour de la zone visée.</div>
+    <label class="interrupteur">Toits en photo aérienne <input type="checkbox" id="toits-photo" checked></label>
+    <div class="aide">L’orthophoto IGN est projetée sur les toits autour de la zone visée.</div>
   </div>
   <div class="reglage">
     <label class="nom" for="decalage">Hauteur des bâtiments <output id="decalage-val">0 m</output></label>
@@ -855,7 +855,8 @@
     }
   }, 400);
 
-  document.getElementById("toits-photo").addEventListener("change", e => {
+  const caseToits = document.getElementById("toits-photo");
+  caseToits.addEventListener("change", e => {
     photoActive = e.target.checked;
     ombrage.setUniform("u_photo", photoActive ? 1 : 0);
     if (!photoActive) for (const emp of emprises) {
@@ -868,6 +869,8 @@
     }
     majEtatToits();
   });
+  // activée par défaut (la case est cochée dans la page)
+  caseToits.dispatchEvent(new Event("change"));
   if (window.__v) window.__v.emprises = emprises;
 
   // ---------- Fiche bâtiment ----------
