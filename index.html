@@ -1211,28 +1211,98 @@
 
   // ---------- Points d'intérêt (poi/poi.geojson, produit par poi/extraire.py) ----------
   // Une source de données par catégorie : chacune a sa case dans les réglages et regroupe ses
-  // épingles proches en une épingle numérotée (un clic dessus rapproche la vue). Les épingles sont
-  // posées sur le relief et restent visibles devant les bâtiments ; le nom apparaît en vue rapprochée.
+  // épingles proches en une pastille numérotée (un clic dessus rapproche la vue).
+  // Épingle « mât » : pastille à icône sur une tige plantée au sol, qui montre le point exact en vue
+  // inclinée. De près (< PRES m), la pastille devient une étiquette portant le nom, sur la même tige.
+  // Les mâts sont plus ou moins hauts selon la catégorie, pour limiter les chevauchements.
+  // Icônes : Tabler (licence MIT, poi/icones), dessinées au double de la taille affichée pour des bords nets.
   const CATEGORIES_POI = {
-    mairie: { nom: "Mairies", un: "Mairie", couleur: "#3B7DDD", icone: "town-hall", visible: true },
-    tourisme: { nom: "Offices de tourisme", un: "Office de tourisme", couleur: "#1E9E5A", texte: "i", visible: true },
-    monument: { nom: "Monuments historiques", un: "Monument historique", couleur: "#C0392B", icone: "monument", visible: true },
-    musee: { nom: "Musées", un: "Musée", couleur: "#8E44AD", icone: "museum", visible: false },
-    point_de_vue: { nom: "Points de vue", un: "Point de vue", couleur: "#D68910", icone: "camera", visible: false },
-    decheterie: { nom: "Déchèteries", un: "Déchèterie", couleur: "#5D8C2C", icone: "waste-basket", visible: false }
+    mairie: { nom: "Mairies", un: "Mairie", couleur: "#3B7DDD", icone: "building-bank", mat: 34, visible: true },
+    tourisme: { nom: "Offices de tourisme", un: "Office de tourisme", couleur: "#1E9E5A", icone: "info-small", mat: 24, visible: true },
+    monument: { nom: "Monuments historiques", un: "Monument historique", couleur: "#C0392B", icone: "building-castle", mat: 29, visible: true },
+    musee: { nom: "Musées", un: "Musée", couleur: "#8E44AD", icone: "palette", mat: 24, visible: false },
+    point_de_vue: { nom: "Points de vue", un: "Point de vue", couleur: "#D68910", icone: "binoculars", mat: 20, visible: false },
+    decheterie: { nom: "Déchèteries", un: "Déchèterie", couleur: "#5D8C2C", icone: "recycle", mat: 20, visible: false }
   };
-  const TAILLE_EPINGLE = 40, epingles = new Cesium.PinBuilder();
-  const imageEpingle = async (c) => (c.icone
-    ? await epingles.fromMakiIconId(c.icone, Cesium.Color.fromCssColorString(c.couleur), TAILLE_EPINGLE)
-    : epingles.fromText(c.texte, Cesium.Color.fromCssColorString(c.couleur), TAILLE_EPINGLE)).toDataURL();
+  const NET = 2, DIAMETRE = 30, HAUTEUR_ETIQUETTE = 30, PRES = 1800;
+  const POLICE_ETIQUETTE = "600 12.5px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
+  const chargerIcone = async (nom) => {
+    const svg = (await (await fetch(`poi/icones/${nom}.svg`)).text()).replaceAll("currentColor", "#fff");
+    const img = new Image();
+    img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+    await img.decode();
+    return img;
+  };
+  // Image de largeur × hauteur px affichés, dessinée NET fois plus grande ; renvoyée en URL (l'atlas
+  // de textures de Cesium réutilise alors la même image quand l'épingle change d'aspect)
+  const dessiner = (largeur, hauteur, trace) => {
+    const toile = document.createElement("canvas");
+    toile.width = Math.ceil(largeur * NET); toile.height = Math.ceil(hauteur * NET);
+    const ctx = toile.getContext("2d");
+    ctx.scale(NET, NET);
+    trace(ctx);
+    return { url: toile.toDataURL(), largeur, hauteur };
+  };
+  const ombre = (ctx, flou) => Object.assign(ctx, { shadowColor: flou ? "rgba(0, 0, 0, 0.5)" : "transparent", shadowBlur: flou, shadowOffsetY: flou ? 1 : 0 });
+  const contourBlanc = (ctx) => { ombre(ctx, 0); Object.assign(ctx, { lineWidth: 2.5, strokeStyle: "#fff" }); ctx.stroke(); };
+  // Mât : tête (largeur × hauteur) en haut, tige blanche, ombre au pied, en bas au centre de l'image
+  const mat = (c, largeurTete, hauteurTete, tete) => {
+    const marge = 4, largeur = largeurTete + 2 * marge, hauteur = marge + hauteurTete + c.mat;
+    return dessiner(largeur, hauteur, ctx => {
+      const x = largeur / 2, pied = hauteur - 2.5;
+      ctx.fillStyle = "rgba(0, 0, 0, 0.45)";
+      ctx.beginPath(); ctx.ellipse(x, pied, 5, 2.5, 0, 0, 2 * Math.PI); ctx.fill();
+      ombre(ctx, 3);
+      Object.assign(ctx, { lineWidth: 2, strokeStyle: "#fff", lineCap: "round" });
+      ctx.beginPath(); ctx.moveTo(x, marge + hauteurTete - 2); ctx.lineTo(x, pied); ctx.stroke();
+      ombre(ctx, 4);
+      tete(ctx, marge, marge);
+    });
+  };
+  const pastilleMat = (c, icone) => mat(c, DIAMETRE, DIAMETRE, (ctx, x, y) => {
+    const r = DIAMETRE / 2;
+    ctx.fillStyle = c.couleur;
+    ctx.beginPath(); ctx.arc(x + r, y + r, r - 1.25, 0, 2 * Math.PI); ctx.fill();
+    contourBlanc(ctx);
+    ctx.drawImage(icone, x + r - 9, y + r - 9, 18, 18);
+  });
+  const mesureTexte = document.createElement("canvas").getContext("2d");
+  const etiquetteMat = (c, icone, nom) => {
+    mesureTexte.font = POLICE_ETIQUETTE;
+    let texte = nom;
+    while (mesureTexte.measureText(texte).width > 210 && texte.length > 6) texte = texte.slice(0, -2).trimEnd() + "…";
+    const h = HAUTEUR_ETIQUETTE, r = h / 2, largeur = Math.ceil(4 + 22 + 7 + mesureTexte.measureText(texte).width + 12);
+    return mat(c, largeur, h, (ctx, x, y) => {
+      ctx.fillStyle = c.couleur;
+      ctx.beginPath(); ctx.roundRect(x + 1.25, y + 1.25, largeur - 2.5, h - 2.5, r); ctx.fill();
+      contourBlanc(ctx);
+      ctx.fillStyle = "rgba(255, 255, 255, 0.22)";
+      ctx.beginPath(); ctx.arc(x + 15, y + r, 11, 0, 2 * Math.PI); ctx.fill();
+      ctx.drawImage(icone, x + 7.5, y + r - 7.5, 15, 15);
+      Object.assign(ctx, { fillStyle: "#fff", font: POLICE_ETIQUETTE, textBaseline: "middle" });
+      ctx.fillText(texte, x + 33, y + r + 0.5);
+    });
+  };
   const imagesGroupes = new Map();
   const imageGroupe = (c, n) => {
     const cle = `${c.couleur}${n}`;
-    if (!imagesGroupes.has(cle)) imagesGroupes.set(cle, epingles.fromText(String(n), Cesium.Color.fromCssColorString(c.couleur), TAILLE_EPINGLE + 6).toDataURL());
+    if (!imagesGroupes.has(cle)) {
+      const d = n < 100 ? 34 : 40, halo = 5, cote = d + 2 * halo + 2, m = cote / 2;
+      imagesGroupes.set(cle, dessiner(cote, cote, ctx => {
+        ctx.fillStyle = Cesium.Color.fromCssColorString(c.couleur).withAlpha(0.35).toCssColorString();
+        ctx.beginPath(); ctx.arc(m, m, d / 2 + halo, 0, 2 * Math.PI); ctx.fill();
+        ombre(ctx, 4);
+        ctx.fillStyle = c.couleur;
+        ctx.beginPath(); ctx.arc(m, m, d / 2 - 1.25, 0, 2 * Math.PI); ctx.fill();
+        contourBlanc(ctx);
+        Object.assign(ctx, { fillStyle: "#fff", font: "700 14px system-ui, sans-serif", textAlign: "center", textBaseline: "middle" });
+        ctx.fillText(String(n), m, m + 0.5);
+      }));
+    }
     return imagesGroupes.get(cle);
   };
-  const auSol = { verticalOrigin: Cesium.VerticalOrigin.BOTTOM, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-    disableDepthTestDistance: Number.POSITIVE_INFINITY };
+  const aspect = v => ({ image: v.url, width: v.largeur, height: v.hauteur });
+  const epinglesPoi = [];                    // { entite, source, position, loin, pres, proche }
   const chargerPoi = async () => {
     let donnees;
     try { donnees = await (await fetch("poi/poi.geojson")).json(); } catch (e) { console.error(e); return; }
@@ -1240,26 +1310,22 @@
     for (const [cle, c] of Object.entries(CATEGORIES_POI)) {
       const points = donnees.features.filter(f => f.properties.categorie === cle);
       if (!points.length) continue;
-      const source = new Cesium.CustomDataSource(cle), image = await imageEpingle(c);
+      const source = new Cesium.CustomDataSource(cle), icone = await chargerIcone(c.icone), loin = pastilleMat(c, icone);
       for (const f of points) {
-        const entite = source.entities.add({
-          position: Cesium.Cartesian3.fromDegrees(...f.geometry.coordinates),
-          billboard: { image, ...auSol, scaleByDistance: new Cesium.NearFarScalar(500, 1, 20000, 0.6) },
-          label: {
-            text: f.properties.nom, font: "600 13px system-ui, sans-serif", fillColor: Cesium.Color.WHITE,
-            showBackground: true, backgroundColor: Cesium.Color.fromCssColorString("rgba(32, 34, 38, 0.85)"),
-            backgroundPadding: new Cesium.Cartesian2(7, 4), pixelOffset: new Cesium.Cartesian2(0, -TAILLE_EPINGLE - 4),
-            distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 2500), ...auSol
-          }
-        });
+        // altitude du sol fournie par l'extraction (m NGF, comme le relief) ; à défaut, posée sur le relief
+        const [lon, lat, z] = f.geometry.coordinates, position = Cesium.Cartesian3.fromDegrees(lon, lat, z ?? 0);
+        const entite = source.entities.add({ position, billboard: { ...aspect(loin), verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+          heightReference: z === undefined ? Cesium.HeightReference.CLAMP_TO_GROUND : Cesium.HeightReference.NONE,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY, scaleByDistance: new Cesium.NearFarScalar(PRES, 1, 20000, 0.6) } });
         entite.poi = f.properties;
+        epinglesPoi.push({ entite, source, position, loin, pres: etiquetteMat(c, icone, f.properties.nom), proche: false });
       }
-      Object.assign(source.clustering, { enabled: true, pixelRange: 36, minimumClusterSize: 3 });
-      // le groupe est placé à l'altitude 0 de l'ellipsoïde, sous le relief : jamais masqué par lui
+      Object.assign(source.clustering, { enabled: true, pixelRange: 30, minimumClusterSize: 3 });
+      // le groupe est placé au barycentre de ses épingles, au sol
       source.clustering.clusterEvent.addEventListener((entites, groupe) => {
         groupe.label.show = false;
-        Object.assign(groupe.billboard, { show: true, id: groupe.label.id, image: imageGroupe(c, entites.length),
-          verticalOrigin: Cesium.VerticalOrigin.BOTTOM, disableDepthTestDistance: Number.POSITIVE_INFINITY });
+        Object.assign(groupe.billboard, { show: true, id: groupe.label.id, ...aspect(imageGroupe(c, entites.length)),
+          verticalOrigin: Cesium.VerticalOrigin.CENTER, disableDepthTestDistance: Number.POSITIVE_INFINITY });
       });
       source.show = c.visible;
       await viewer.dataSources.add(source);
@@ -1272,6 +1338,17 @@
     }
   };
   chargerPoi();
+  // Pastille ↔ étiquette selon la distance à la caméra (marge de 15 % pour éviter le clignotement)
+  setInterval(() => {
+    for (const e of epinglesPoi) {
+      if (!e.source.show) continue;
+      const d = Cesium.Cartesian3.distance(camera.positionWC, e.position);
+      const proche = d < PRES * (e.proche ? 1.15 : 1);
+      if (proche === e.proche) continue;
+      e.proche = proche;
+      Object.assign(e.entite.billboard, aspect(proche ? e.pres : e.loin));
+    }
+  }, 200);
   // « 1975/04/11 : inscrit MH ; 1998/01/26 : classé MH » → « inscrit MH le 11/04/1975, classé MH le 26/01/1998 »
   const datesProtection = v => vide(v) ? null : String(v).split(";")
     .map(s => s.trim().replace(/^(\d{4})\/(\d{2})\/(\d{2})\s*:\s*(.+)$/, "$4 le $3/$2/$1")).join(", ");

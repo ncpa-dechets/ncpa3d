@@ -119,6 +119,18 @@ def main():
             "statut": r["Statut_juridique_de_l_edifice"],
             "source": "Mérimée, ministère de la Culture", "id": r["Reference"]}))
 
+    # altitude du sol (RGE ALTI, m NGF, comme le relief de la carte) en 3e coordonnée : épingles et
+    # groupes d'épingles sont ainsi placés au sol même sans relief affiché
+    for i in range(0, len(points), 50):
+        lot = points[i:i + 50]
+        rep = json.loads(lire("https://data.geopf.fr/altimetrie/1.0/calcul/alti/rest/elevation.json?" + urllib.parse.urlencode({
+            "lon": "|".join(str(f["geometry"]["coordinates"][0]) for f in lot),
+            "lat": "|".join(str(f["geometry"]["coordinates"][1]) for f in lot),
+            "resource": "ign_rge_alti_wld", "zonly": "true"})))
+        for f, z in zip(lot, rep["elevations"]):
+            if z > -1000:  # -99999 : pas de donnée
+                f["geometry"]["coordinates"].append(round(z, 1))
+
     points.sort(key=lambda f: (f["properties"]["categorie"], f["properties"]["commune"], f["properties"]["nom"]))
     with open(SORTIE, "w", encoding="utf-8") as s:
         s.write('{"type":"FeatureCollection","features":[\n')
