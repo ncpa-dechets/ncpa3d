@@ -5,11 +5,17 @@ Sources, sans clé :
   Ce sont des zones : on garde le centre de la plus grande, filtrée sur le code INSEE des communes de NCPA.
 - Base Mérimée du ministère de la Culture : immeubles protégés au titre des monuments historiques,
   gardés s'ils tombent dans le contour d'une commune de NCPA (le code INSEE de la notice peut être ancien).
+  La fiche de chaque monument est complétée par Wikidata (via la référence Mérimée) : photo de Wikimedia
+  Commons avec son crédit, et article Wikipédia.
+
+À relancer une fois par an environ pour suivre les nouvelles protections, notices et photos.
 """
 import csv
+import html
 import io
 import json
 import os
+import re
 import urllib.parse
 import urllib.request
 
@@ -23,6 +29,7 @@ NATURES = {  # nature BD TOPO → catégorie affichée sur la carte
     "Déchèterie": "decheterie",
 }
 MERIMEE = "https://ministere-culture.s3.sbg.io.cloud.ovh.net/POP/merimee.csv"
+RESUME = 300  # longueur visée du résumé de l'historique, en caractères
 
 
 def lire(url):
@@ -65,6 +72,66 @@ def centre(geometrie):
         a = polygones(geometrie)[0][0]
         return [sum(x for x, _ in a) / len(a), sum(y for _, y in a) / len(a)]
     return [meilleur[1], meilleur[2]]
+
+
+def resume(texte):
+    """Premières phrases de l'historique, dans la limite de RESUME caractères."""
+    # certaines notices gardent des caractères Windows-1252 (\x92 pour l'apostrophe…)
+    texte = re.sub(r"[\x80-\x9f]", lambda m: m.group().encode("latin-1").decode("cp1252", "ignore"), texte)
+    texte = " ".join(texte.split()).strip('"« »')
+    if not texte:
+        return None
+    # fin de phrase : ponctuation après une minuscule ou un chiffre (pas après « E. » d'un prénom)
+    phrases = re.split(r"(?<=[a-zàâçéèêëîïôûùüÿœ0-9)»][.!?])\s+", texte)
+    garde = phrases[0]
+    for p in phrases[1:]:
+        if len(garde) + 1 + len(p) > RESUME:
+            break
+        garde += " " + p
+    if len(garde) > RESUME:
+        garde = garde[:RESUME].rsplit(" ", 1)[0].rstrip(",;:") + "…"
+    elif garde != texte:
+        garde += " …"
+    return garde
+
+
+def wikidata(monuments):
+    """Photo Commons (avec auteur et licence) et article Wikipédia des monuments, par leur référence Mérimée."""
+    refs = " ".join(f'"{f["properties"]["id"]}"' for f in monuments)
+    rep = json.loads(lire("https://query.wikidata.org/sparql?" + urllib.parse.urlencode({"format": "json", "query": f"""
+        SELECT ?ref ?image ?article WHERE {{
+          VALUES ?ref {{ {refs} }} ?item wdt:P380 ?ref .
+          OPTIONAL {{ ?item wdt:P18 ?image }}
+          OPTIONAL {{ ?article schema:about ?item ; schema:isPartOf <https://fr.wikipedia.org/> }}
+        }}"""})))
+    infos = {}
+    for b in rep["results"]["bindings"]:  # une seule photo par monument, même s'il en a plusieurs
+        infos.setdefault(b["ref"]["value"], {k: v["value"] for k, v in b.items()})
+    fichiers = {"File:" + urllib.parse.unquote(i["image"].rsplit("/", 1)[1]): r for r, i in infos.items() if "image" in i}
+    photos = {}
+    noms = list(fichiers)
+    for i in range(0, len(noms), 50):
+        rep = json.loads(lire("https://commons.wikimedia.org/w/api.php?" + urllib.parse.urlencode({
+            "action": "query", "format": "json", "prop": "imageinfo", "iiprop": "url|extmetadata", "iiurlwidth": 500,
+            "iiextmetadatafilter": "Artist|LicenseShortName", "titles": "|".join(noms[i:i + 50])})))
+        norm = {n["to"]: n["from"] for n in rep["query"].get("normalized", [])}
+        for page in rep["query"]["pages"].values():
+            if "imageinfo" not in page:
+                continue
+            ii = page["imageinfo"][0]
+            meta = {k: v["value"] for k, v in ii.get("extmetadata", {}).items()}
+            auteur = " ".join(html.unescape(re.sub(r"<[^>]+>", " ", meta.get("Artist", ""))).split())
+            auteur = re.sub(r"\s*\d{1,2}:\d{2}, \d{1,2} \w+ \d{4} \(UTC\)", "", auteur)  # signature horodatée
+            auteur = "" if "unknown author" in auteur.lower() else auteur
+            photos[fichiers[norm.get(page["title"], page["title"])]] = {
+                "photo": ii["thumburl"].split("?")[0], "photo_page": ii["descriptionurl"],
+                "photo_credit": " · ".join(v for v in (auteur, meta.get("LicenseShortName")) if v)}
+    for f in monuments:
+        i = infos.get(f["properties"]["id"], {})
+        f["properties"].update({k: v for k, v in photos.get(f["properties"]["id"], {}).items() if v})
+        if "article" in i:
+            f["properties"]["wikipedia"] = i["article"]
+    print(f"Wikidata : {len(photos)} photos, {sum('article' in i for i in infos.values())} articles Wikipédia")
 
 
 def point(x, y, proprietes):
@@ -116,8 +183,13 @@ def main():
             "protection": "Classé" if "classé" in typo else "Inscrit" if "inscrit" in typo else None,
             "protections": r["Date_et_typologie_de_la_protection"],
             "siecle": r["Format_abrege_du_siecle_de_construction"].replace(";", ", "),
+            "datation": r["Datation_de_l_edifice"].replace(";", ", "),
+            "auteurs": r["Auteur_de_l_edifice"].replace(";", ", "),
+            "historique": resume(r["Historique"]),
             "statut": r["Statut_juridique_de_l_edifice"],
             "source": "Mérimée, ministère de la Culture", "id": r["Reference"]}))
+
+    wikidata([f for f in points if f["properties"]["categorie"] == "monument"])
 
     # altitude du sol (RGE ALTI, m NGF, comme le relief de la carte) en 3e coordonnée : épingles et
     # groupes d'épingles sont ainsi placés au sol même sans relief affiché

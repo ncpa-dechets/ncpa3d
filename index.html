@@ -184,6 +184,12 @@
   .lignes.brutes { grid-template-columns: minmax(0, 1fr); row-gap: 0; font: 12px/1.4 var(--mono); }
   .lignes.brutes dd { margin-bottom: 6px; }
   #fiche a { color: var(--lien); }
+  .photo { margin: 2px 0 10px; }
+  .photo img { display: block; width: 100%; aspect-ratio: 3 / 2; max-height: 200px; object-fit: cover; border-radius: 8px; background: rgba(255, 255, 255, 0.07); }
+  .photo figcaption { margin-top: 3px; color: var(--texte-attenue); font-size: 11px; overflow-wrap: anywhere; }
+  #fiche .photo figcaption a { color: inherit; }
+  .historique { margin: 0 0 10px; font-size: 13px; line-height: 1.45; }
+  @media (max-width: 640px) { .photo img { max-height: 150px; } }
   .ident { font: 12px/1.4 var(--mono); }
   .copier {
     flex: none; padding: 1px 6px; border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 5px;
@@ -1360,13 +1366,25 @@
     if (choisi) colorer(choisi, COULEUR);
     choisi = null;
     const blocs = [];
+    const lien = (texte, href) => Object.assign(el("a", null, texte), { href, target: "_blank", rel: "noopener noreferrer" });
+    // photo Wikimedia Commons (via Wikidata), créditée et liée à sa page ; retirée si elle ne charge pas
+    if (p.photo) {
+      const figure = el("figure", "photo"), img = Object.assign(el("img"), { src: p.photo, alt: p.nom, loading: "lazy" });
+      img.addEventListener("error", () => figure.remove());
+      const legende = el("figcaption", null, "Photo ");
+      legende.append(lien([p.photo_credit, "Wikimedia Commons"].filter(Boolean).join(" · "), p.photo_page));
+      figure.append(img, legende); blocs.push(figure);
+    }
+    if (p.historique) blocs.push(el("p", "historique", p.historique));
+    const epoque = [p.siecle, p.datation && (p.siecle ? `(${p.datation})` : p.datation)].filter(Boolean).join(" ");
     const l = lignes([["Commune", p.commune], ["Adresse", p.adresse], ["Protection", datesProtection(p.protections)],
-      ["Époque", p.siecle], ["Statut", p.statut], ["Source", p.source]]);
+      ["Époque", epoque], [p.auteurs?.includes(",") ? "Auteurs" : "Auteur", p.auteurs], ["Statut", p.statut], ["Source", p.source]]);
     if (l) blocs.push(l);
     if (p.categorie === "monument" && p.id) {
-      const lien = Object.assign(el("a", null, "Notice sur la plateforme POP du ministère"),
-        { href: `https://pop.culture.gouv.fr/notice/merimee/${encodeURIComponent(p.id)}`, target: "_blank", rel: "noopener noreferrer" });
-      const para = el("p"); para.append(lien); blocs.push(para);
+      const para = el("p");
+      para.append(lien("Notice POP du ministère", `https://pop.culture.gouv.fr/notice/merimee/${encodeURIComponent(p.id)}`));
+      if (p.wikipedia) para.append(" · ", lien("Article Wikipédia", p.wikipedia));
+      blocs.push(para);
     }
     const type = p.protection ? `${c.un} ${p.protection.toLowerCase()}` : c.un;
     afficherCarte(p.nom, [p.nom === c.un ? null : type, p.commune].filter(Boolean).join(" · "), blocs);
