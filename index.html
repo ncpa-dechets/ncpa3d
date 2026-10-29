@@ -122,6 +122,34 @@
   .etat p { margin: 0 0 2px; }
   .etat .erreur { color: #ff9b8a; }
 
+  /* ---------- Mode drone ---------- */
+  #bouton-drone[aria-pressed="true"] { background: var(--bouton-actif); color: var(--lien); }
+  #drone {
+    position: absolute; z-index: 15; right: 12px; bottom: calc(56px + env(safe-area-inset-bottom, 0px));
+    width: 250px; box-sizing: border-box; padding: 10px 12px; background: var(--carte-voile);
+    border: 1px solid var(--bord); border-radius: 10px; box-shadow: var(--ombre); animation: apparition 0.18s ease-out;
+  }
+  .drone-entete { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .drone-entete h2 { margin: 0; font-size: 15px; font-weight: 600; }
+  #drone .chiffres { margin: 0 0 10px; }
+  #drone .chiffre { padding: 6px 2px; }
+  #drone .chiffre b { font-size: 15px; font-variant-numeric: tabular-nums; }
+  .pad {
+    display: grid; justify-content: center; gap: 4px; margin: 10px 0 8px;
+    grid-template-columns: repeat(3, 40px) 10px 40px; grid-template-rows: repeat(3, 34px);
+    grid-template-areas: ". avant . . monter" "gauche croisiere droite . alt" ". arriere . . descendre";
+  }
+  .pad button {
+    border: 1px solid rgba(255, 255, 255, 0.18); border-radius: 7px; background: rgba(255, 255, 255, 0.06);
+    color: #e0e3e8; font-size: 16px; cursor: pointer; touch-action: none; user-select: none; -webkit-user-select: none;
+  }
+  .pad button.appuye, .pad button[aria-pressed="true"] { background: rgba(142, 197, 255, 0.25); border-color: var(--lien); color: white; }
+  .pad .alt { grid-area: alt; align-self: center; text-align: center; color: var(--texte-attenue); font-size: 11px; }
+  #drone .aide { margin: 0; color: var(--texte-attenue); font-size: 12px; }
+  #drone kbd { font: 11px var(--mono); padding: 0 3px; border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 3px; }
+  @media (pointer: coarse) { #drone .aide { display: none; } }
+  @media (max-width: 640px) { #drone { bottom: calc(96px + env(safe-area-inset-bottom, 0px)); width: 210px; } }
+
   /* ---------- Fiche bâtiment : carte en haut à droite, feuille du bas sur téléphone ---------- */
   #fiche {
     position: fixed; z-index: 20; top: calc(12px + env(safe-area-inset-top, 0px)); right: 12px;
@@ -250,6 +278,9 @@
     <button type="button" class="bouton" id="incliner-horizon" title="Incliner la vue vers l'horizon" aria-label="Incliner la vue vers l'horizon" style="font-size:20px">&#8595;</button>
   </div>
   <button type="button" class="bouton" id="vue-initiale" title="Revenir à la vue initiale" aria-label="Revenir à la vue initiale">&#8634;</button>
+  <button type="button" class="bouton" id="bouton-drone" aria-pressed="false" aria-controls="drone" title="Mode drone : survoler la carte au clavier" aria-label="Mode drone">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M9.5 9.5 7 7M14.5 9.5 17 7M9.5 14.5 7 17M14.5 14.5 17 17"/><rect x="9" y="9" width="6" height="6" rx="1.5"/><circle cx="5" cy="5" r="2.6"/><circle cx="19" cy="5" r="2.6"/><circle cx="5" cy="19" r="2.6"/><circle cx="19" cy="19" r="2.6"/></svg>
+  </button>
   <button type="button" class="bouton" id="bouton-reglages" aria-expanded="false" aria-controls="reglages" title="Réglages de la carte" aria-label="Réglages de la carte">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>
   </button>
@@ -287,6 +318,36 @@
     <p id="etat-toits" hidden></p>
     <p>Clic droit : contrôle de l’altitude du sol sous le curseur.</p>
   </div>
+</section>
+
+<section id="drone" hidden aria-label="Mode drone">
+  <header class="drone-entete">
+    <h2>Mode drone</h2>
+    <button type="button" class="fermer" id="drone-quitter" title="Quitter le mode drone (Échap)" aria-label="Quitter le mode drone">×</button>
+  </header>
+  <div class="chiffres">
+    <div class="chiffre"><b id="drone-hauteur">—</b><span>Hauteur</span></div>
+    <div class="chiffre"><b id="drone-vitesse">—</b><span>km/h</span></div>
+    <div class="chiffre"><b id="drone-cap">—</b><span>Cap</span></div>
+  </div>
+  <div class="segments" role="group" aria-label="Allure">
+    <button type="button" data-allure="lente" aria-pressed="false">Lente</button>
+    <button type="button" data-allure="normale" aria-pressed="true">Normale</button>
+    <button type="button" data-allure="rapide" aria-pressed="false">Rapide</button>
+  </div>
+  <div class="pad">
+    <button type="button" data-commande="avant" style="grid-area:avant" title="Avancer (↑)" aria-label="Avancer">&#8593;</button>
+    <button type="button" data-commande="gauche" style="grid-area:gauche" title="Tourner à gauche (←)" aria-label="Tourner à gauche">&#8592;</button>
+    <button type="button" id="drone-croisiere" style="grid-area:croisiere" aria-pressed="false" title="Croisière : avancer seul (Espace)" aria-label="Croisière">&#9654;</button>
+    <button type="button" data-commande="droite" style="grid-area:droite" title="Tourner à droite (→)" aria-label="Tourner à droite">&#8594;</button>
+    <button type="button" data-commande="arriere" style="grid-area:arriere" title="Reculer (↓)" aria-label="Reculer">&#8595;</button>
+    <button type="button" data-commande="monter" style="grid-area:monter;font-size:12px" title="Monter (A ou Page ↑)" aria-label="Monter">&#9650;</button>
+    <span class="alt" aria-hidden="true">alt.</span>
+    <button type="button" data-commande="descendre" style="grid-area:descendre;font-size:12px" title="Descendre (Q ou Page ↓)" aria-label="Descendre">&#9660;</button>
+  </div>
+  <p class="aide"><kbd>↑</kbd> <kbd>↓</kbd> avancer, reculer · <kbd>←</kbd> <kbd>→</kbd> tourner<br>
+    <kbd>A</kbd> <kbd>Q</kbd> ou molette : altitude · <kbd>Espace</kbd> croisière<br>
+    Glisser : regarder autour · <kbd>Échap</kbd> quitter</p>
 </section>
 
 <aside id="fiche" hidden aria-label="Informations sur le bâtiment"></aside>
@@ -630,7 +691,7 @@
   document.getElementById("zoom-moins").addEventListener("click", () => orbiter({ facteur: 2 }));
   document.getElementById("incliner-horizon").addEventListener("click", () => orbiter({ inclinaison: camera.pitch + deg(10) }));
   document.getElementById("incliner-sol").addEventListener("click", () => orbiter({ inclinaison: camera.pitch - deg(10) }));
-  document.getElementById("vue-initiale").addEventListener("click", () => { fermerFiche(); allerVueEnsemble(duree(1.5)); });
+  document.getElementById("vue-initiale").addEventListener("click", () => { arreterDrone(); fermerFiche(); allerVueEnsemble(duree(1.5)); });
   const aiguille = document.getElementById("aiguille"), bascule3d = document.getElementById("bascule-3d");
   let capAffiche = null, mode2d = null;
   scene.postRender.addEventListener(() => {
@@ -644,6 +705,162 @@
   const boutonReglages = document.getElementById("bouton-reglages"), reglages = document.getElementById("reglages");
   const ouvrirReglages = (ouvert) => { reglages.hidden = !ouvert; boutonReglages.setAttribute("aria-expanded", String(ouvert)); };
   boutonReglages.addEventListener("click", () => ouvrirReglages(reglages.hidden));
+
+  // ---------- Mode drone : survol au clavier ----------
+  // Vol à hauteur constante au-dessus du relief chargé (sol sous la caméra et un peu devant), avec
+  // inertie. La vitesse est une part de la hauteur par seconde : elle reste bien sous le seuil de
+  // « déplacement rapide », le relief, la photo et les bâtiments ont donc le temps de se charger.
+  // La caméra est déplacée en preUpdate, avant le calage des toits en photo (preRender).
+  const DRONE = {
+    allures: { lente: 0.06, normale: 0.12, rapide: 0.25 },
+    vitesseMin: 4, vitesseMax: 90,                       // m/s
+    virage: deg(28),                                     // rad/s
+    hauteurMin: 15, hauteurMax: 2000, hauteurDepart: 160,
+    inclinaison: deg(-20)
+  };
+  const R_TERRE = 6378137;
+  const panneauDrone = document.getElementById("drone"), boutonDrone = document.getElementById("bouton-drone");
+  const boutonCroisiere = document.getElementById("drone-croisiere");
+  const drone = { actif: false, allure: "normale", croisiere: false, vitesse: 0, rotation: 0, montee: 0,
+    hauteur: DRONE.hauteurDepart, alt: 0, sol: 0, regardCap: 0, regardInclinaison: 0, recaler: true, t: 0 };
+  const commandes = { clavier: new Map(), pad: new Set() };     // clavier : code de la touche → commande
+  const commande = c => commandes.pad.has(c) || [...commandes.clavier.values()].includes(c);
+  const carto = new Cesium.Cartographic();
+  const solEn = (lon, lat) => globe.getHeight(Cesium.Cartographic.fromRadians(lon, lat, 0, carto));
+  // point à d mètres dans la direction du cap (approximation sphérique, suffisante pas à pas)
+  const decaler = (lon, lat, cap, d) => [lon + d * Math.sin(cap) / (R_TERRE * Math.cos(lat)), lat + d * Math.cos(cap) / R_TERRE];
+
+  scene.preUpdate.addEventListener(() => {
+    if (!drone.actif) return;
+    const t = performance.now(), dt = Math.min(0.1, (t - drone.t) / 1000);
+    drone.t = t;
+    // un vol animé (recherche, boutons de navigation) a la main : on se recale à son arrivée
+    if (camera._currentFlight) { Object.assign(drone, { recaler: true, vitesse: 0, rotation: 0, montee: 0 }); return; }
+    const pos = camera.positionCartographic, lon = pos.longitude, lat = pos.latitude;
+    const ici = solEn(lon, lat);
+    if (ici !== undefined) drone.sol = ici;
+    if (drone.recaler) {
+      drone.recaler = false;
+      drone.alt = pos.height;
+      drone.hauteur = Cesium.Math.clamp(pos.height - drone.sol, DRONE.hauteurMin, DRONE.hauteurMax);
+    }
+    const lisse = tau => 1 - Math.exp(-dt / tau);
+    const axe = (a, b) => (commande(a) ? 1 : 0) - (commande(b) ? 1 : 0);
+    let avance = axe("avant", "arriere");
+    if (drone.croisiere && avance === 0) avance = 1;
+    const vMax = Cesium.Math.clamp(DRONE.allures[drone.allure] * drone.hauteur, DRONE.vitesseMin, DRONE.vitesseMax);
+    drone.vitesse += (avance * vMax * (avance < 0 ? 0.5 : 1) - drone.vitesse) * lisse(0.8);
+    drone.rotation += (axe("droite", "gauche") * DRONE.virage - drone.rotation) * lisse(0.3);
+    drone.montee += (axe("monter", "descendre") * Math.max(0.4 * drone.hauteur, 8) - drone.montee) * lisse(0.3);
+    drone.hauteur = Cesium.Math.clamp(drone.hauteur + drone.montee * dt, DRONE.hauteurMin, DRONE.hauteurMax);
+
+    const cap = camera.heading + drone.rotation * dt + drone.regardCap;
+    const [lon2, lat2] = decaler(lon, lat, cap, drone.vitesse * dt);
+    // anticipe le relief à ~3 s devant (au moins 60 m) pour ne pas foncer dans une colline
+    const devant = solEn(...decaler(lon2, lat2, cap, Math.max(Math.abs(drone.vitesse) * 3, 60) * (drone.vitesse < 0 ? -1 : 1)));
+    const cible = Math.max(drone.sol, devant ?? -Infinity) + drone.hauteur;
+    const vVert = Math.max(0.8 * drone.hauteur, 10) * dt;   // pas de chute brutale après un saut de hauteur
+    drone.alt = Math.max(drone.alt + Cesium.Math.clamp((cible - drone.alt) * lisse(0.6), -vVert, vVert), drone.sol + 3);
+    camera.setView({
+      destination: Cesium.Cartesian3.fromRadians(lon2, lat2, drone.alt),
+      orientation: { heading: cap, pitch: Cesium.Math.clamp(camera.pitch + drone.regardInclinaison, deg(-89), deg(15)), roll: 0 }
+    });
+    drone.regardCap = drone.regardInclinaison = 0;
+  });
+
+  const regleCroisiere = (v) => {
+    drone.croisiere = v;
+    boutonCroisiere.setAttribute("aria-pressed", String(v));
+    boutonCroisiere.innerHTML = v ? "&#10074;&#10074;" : "&#9654;";
+  };
+  const demarrerDrone = () => {
+    Object.assign(drone, { actif: true, vitesse: 0, rotation: 0, montee: 0, recaler: true, t: performance.now() });
+    regleCroisiere(false);
+    scene.screenSpaceCameraController.enableInputs = false;
+    panneauDrone.hidden = false; boutonDrone.setAttribute("aria-pressed", "true");
+    ouvrirReglages(false);
+    document.activeElement?.blur();                    // les flèches et Espace ne doivent pas viser un bouton
+    const pos = camera.positionCartographic, h = pos.height - (globe.getHeight(pos) ?? 0);
+    const orientation = { heading: camera.heading, pitch: DRONE.inclinaison, roll: 0 };
+    if (h > 30 && h < 800) {
+      camera.flyTo({ destination: Cesium.Cartesian3.clone(camera.positionWC), orientation, duration: duree(0.8) });
+      return;
+    }
+    // vue lointaine : descend à la hauteur de départ, en retrait du point visé pour le garder en vue
+    const c = Cesium.Cartographic.fromCartesian(cibleAuSol());
+    const [lon, lat] = decaler(c.longitude, c.latitude, camera.heading, -DRONE.hauteurDepart / Math.tan(-DRONE.inclinaison));
+    camera.flyTo({ destination: Cesium.Cartesian3.fromRadians(lon, lat, c.height + DRONE.hauteurDepart), orientation, duration: duree(2.5) });
+  };
+  const arreterDrone = () => {
+    drone.actif = false;
+    commandes.clavier.clear(); commandes.pad.clear(); regleCroisiere(false);
+    panneauDrone.querySelectorAll(".appuye").forEach(b => b.classList.remove("appuye"));
+    scene.screenSpaceCameraController.enableInputs = true;
+    panneauDrone.hidden = true; boutonDrone.setAttribute("aria-pressed", "false");
+  };
+  boutonDrone.addEventListener("click", () => drone.actif ? arreterDrone() : demarrerDrone());
+  document.getElementById("drone-quitter").addEventListener("click", arreterDrone);
+  boutonCroisiere.addEventListener("click", () => regleCroisiere(!drone.croisiere));
+  panneauDrone.querySelectorAll("[data-allure]").forEach(b => b.addEventListener("click", () => {
+    drone.allure = b.dataset.allure;
+    panneauDrone.querySelectorAll("[data-allure]").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+  }));
+  // Pavé à l'écran (souris ou doigt) : commande maintenue tant que le bouton est appuyé
+  panneauDrone.querySelectorAll("[data-commande]").forEach(b => {
+    const c = b.dataset.commande;
+    const lacher = () => { commandes.pad.delete(c); b.classList.remove("appuye"); };
+    b.addEventListener("pointerdown", e => {
+      e.preventDefault(); b.setPointerCapture(e.pointerId);
+      commandes.pad.add(c); b.classList.add("appuye");
+      if (c === "arriere") regleCroisiere(false);
+    });
+    for (const type of ["pointerup", "pointercancel", "lostpointercapture"]) b.addEventListener(type, lacher);
+  });
+  boutonCroisiere.addEventListener("pointerdown", e => e.preventDefault());   // pas de focus : Espace reste au drone
+
+  const TOUCHES = { ArrowUp: "avant", ArrowDown: "arriere", ArrowLeft: "gauche", ArrowRight: "droite",
+    PageUp: "monter", PageDown: "descendre", a: "monter", q: "descendre", "+": "monter", "-": "descendre" };
+  const saisie = el => el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
+  document.addEventListener("keydown", e => {
+    if (!drone.actif || e.ctrlKey || e.metaKey || e.altKey || saisie(e.target)) return;
+    if (e.key === " ") {
+      if (e.target.tagName === "BUTTON") return;         // Espace active le bouton qui a le focus
+      e.preventDefault();
+      if (!e.repeat) regleCroisiere(!drone.croisiere);
+      return;
+    }
+    const c = TOUCHES[e.key.length === 1 ? e.key.toLowerCase() : e.key];
+    if (!c) return;
+    e.preventDefault();
+    commandes.clavier.set(e.code, c);
+    if (c === "arriere") regleCroisiere(false);
+  });
+  document.addEventListener("keyup", e => { commandes.clavier.delete(e.code); });
+  addEventListener("blur", () => commandes.clavier.clear());
+  // Souris : glisser pour regarder autour, molette pour l'altitude
+  let glisse = null;
+  scene.canvas.addEventListener("pointerdown", e => { if (drone.actif && e.isPrimary) glisse = { x: e.clientX, y: e.clientY }; });
+  scene.canvas.addEventListener("pointermove", e => {
+    if (!glisse || !drone.actif || !e.isPrimary) return;
+    if (e.pointerType === "mouse" && !(e.buttons & 1)) { glisse = null; return; }
+    drone.regardCap -= (e.clientX - glisse.x) * 0.0045;
+    drone.regardInclinaison += (e.clientY - glisse.y) * 0.0045;
+    glisse = { x: e.clientX, y: e.clientY };
+  });
+  for (const type of ["pointerup", "pointercancel"]) scene.canvas.addEventListener(type, () => { glisse = null; });
+  scene.canvas.addEventListener("wheel", e => {
+    if (!drone.actif) return;
+    e.preventDefault();
+    drone.hauteur = Cesium.Math.clamp(drone.hauteur * Math.exp(e.deltaY * (e.deltaMode ? 0.05 : 0.0015)), DRONE.hauteurMin, DRONE.hauteurMax);
+  }, { passive: false });
+  const droneHauteur = document.getElementById("drone-hauteur"), droneVitesse = document.getElementById("drone-vitesse");
+  const droneCap = document.getElementById("drone-cap");
+  setInterval(() => {
+    if (!drone.actif) return;
+    droneHauteur.textContent = `${Math.round(camera.positionCartographic.height - drone.sol)} m`;
+    droneVitesse.textContent = String(Math.round(Math.abs(drone.vitesse) * 3.6));
+    droneCap.textContent = `${Math.round(Cesium.Math.toDegrees(camera.heading)) % 360}°`;
+  }, 250);
 
   // ---------- Masquage lointain, fondu et indicateur de chargement ----------
   const statut = document.getElementById("statut"), statutTexte = document.getElementById("statut-texte");
@@ -995,6 +1212,7 @@
     if (e.key !== "Escape") return;
     if (!reglages.hidden) ouvrirReglages(false);
     else if (!fiche.hidden) fermerFiche();
+    else if (drone.actif) arreterDrone();
   });
   // Sur téléphone, si le bâtiment touché est caché par la feuille du bas, on remonte la vue
   const degagerSousFeuille = (x, y) => {
