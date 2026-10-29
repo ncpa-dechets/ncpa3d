@@ -310,7 +310,7 @@
     <div class="aide">Sans relief, les bâtiments flottent à leur altitude réelle.</div>
   </div>
   <div class="reglage">
-    <label class="interrupteur">Ombres du soleil <input type="checkbox" id="ombres" checked></label>
+    <label class="interrupteur">Ombres du soleil <input type="checkbox" id="ombres"></label>
   </div>
   <div class="reglage">
     <label class="interrupteur">Toits en photo aérienne <input type="checkbox" id="toits-photo" checked></label>
@@ -668,11 +668,14 @@
     majObscurite();
   };
   curseurHeure.addEventListener("input", regleHeure); regleHeure();
-  document.getElementById("ombres").addEventListener("change", e => {
+  const caseOmbres = document.getElementById("ombres");
+  caseOmbres.addEventListener("change", e => {
     viewer.shadows = e.target.checked;
     if (tileset) tileset.shadows = e.target.checked ? Cesium.ShadowMode.ENABLED : Cesium.ShadowMode.DISABLED;
     regleUniforme("u_ombres", e.target.checked ? 1 : 0);
   });
+  // désactivées par défaut (la case n'est pas cochée dans la page)
+  caseOmbres.dispatchEvent(new Event("change"));
 
   // ---------- Navigation (boussole, 2D/3D, zoom, inclinaison, vue initiale) ----------
   const centreEcran = () => new Cesium.Cartesian2(scene.canvas.clientWidth / 2, scene.canvas.clientHeight / 2);
@@ -1217,9 +1220,9 @@
   // Les mâts sont plus ou moins hauts selon la catégorie, pour limiter les chevauchements.
   // Icônes : Tabler (licence MIT, poi/icones), dessinées au double de la taille affichée pour des bords nets.
   const CATEGORIES_POI = {
-    mairie: { nom: "Mairies", un: "Mairie", couleur: "#3B7DDD", icone: "building-bank", mat: 34, visible: true },
-    tourisme: { nom: "Offices de tourisme", un: "Office de tourisme", couleur: "#1E9E5A", icone: "info-small", mat: 24, visible: true },
-    monument: { nom: "Monuments historiques", un: "Monument historique", couleur: "#C0392B", icone: "building-castle", mat: 29, visible: true },
+    mairie: { nom: "Mairies", un: "Mairie", couleur: "#3B7DDD", icone: "building-bank", mat: 34, visible: false },
+    tourisme: { nom: "Offices de tourisme", un: "Office de tourisme", couleur: "#1E9E5A", icone: "info-small", mat: 24, visible: false },
+    monument: { nom: "Monuments historiques", un: "Monument historique", couleur: "#C0392B", icone: "building-castle", mat: 29, visible: false },
     musee: { nom: "Musées", un: "Musée", couleur: "#8E44AD", icone: "palette", mat: 24, visible: false },
     point_de_vue: { nom: "Points de vue", un: "Point de vue", couleur: "#D68910", icone: "binoculars", mat: 20, visible: false },
     decheterie: { nom: "Déchèteries", un: "Déchèterie", couleur: "#5D8C2C", icone: "recycle", mat: 20, visible: false }
