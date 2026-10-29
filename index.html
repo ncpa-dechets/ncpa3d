@@ -118,6 +118,11 @@
   label.interrupteur { display: flex; align-items: center; justify-content: space-between; gap: 10px; cursor: pointer; font-size: 13px; font-weight: 600; color: #e0e3e8; }
   label.interrupteur input { accent-color: var(--lien); width: 16px; height: 16px; margin: 0; }
   #reglages input[type="range"] { width: 100%; margin: 0; accent-color: var(--lien); }
+  .poi-liste { display: flex; flex-direction: column; gap: 6px; }
+  .poi-liste label { display: flex; align-items: center; gap: 8px; color: #e0e3e8; font-size: 13px; cursor: pointer; }
+  .poi-liste input { accent-color: var(--lien); width: 16px; height: 16px; margin: 0; flex: none; }
+  .poi-liste .couleur { width: 10px; height: 10px; border-radius: 50%; flex: none; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4); }
+  .poi-liste .compte { margin-left: auto; color: var(--texte-attenue); font-variant-numeric: tabular-nums; }
   .etat { border-top: 1px solid var(--trait); padding-top: 8px; font-size: 12px; color: var(--texte-attenue); }
   .etat p { margin: 0 0 2px; }
   .etat .erreur { color: #ff9b8a; }
@@ -295,6 +300,10 @@
       <button type="button" data-fond="plan" aria-pressed="false">Plan</button>
       <button type="button" data-fond="lidar" aria-pressed="false">Relief LiDAR</button>
     </div>
+  </div>
+  <div class="reglage">
+    <div class="nom">Points d’intérêt</div>
+    <div class="poi-liste" id="poi-categories" role="group" aria-label="Points d’intérêt affichés"></div>
   </div>
   <div class="reglage">
     <label class="interrupteur">Relief <input type="checkbox" id="relief" checked></label>
@@ -1200,6 +1209,97 @@
     afficherCarte(titre, sousTitre, blocs);
   };
 
+  // ---------- Points d'intérêt (poi/poi.geojson, produit par poi/extraire.py) ----------
+  // Une source de données par catégorie : chacune a sa case dans les réglages et regroupe ses
+  // épingles proches en une épingle numérotée (un clic dessus rapproche la vue). Les épingles sont
+  // posées sur le relief et restent visibles devant les bâtiments ; le nom apparaît en vue rapprochée.
+  const CATEGORIES_POI = {
+    mairie: { nom: "Mairies", un: "Mairie", couleur: "#3B7DDD", icone: "town-hall", visible: true },
+    tourisme: { nom: "Offices de tourisme", un: "Office de tourisme", couleur: "#1E9E5A", texte: "i", visible: true },
+    monument: { nom: "Monuments historiques", un: "Monument historique", couleur: "#C0392B", icone: "monument", visible: true },
+    musee: { nom: "Musées", un: "Musée", couleur: "#8E44AD", icone: "museum", visible: false },
+    point_de_vue: { nom: "Points de vue", un: "Point de vue", couleur: "#D68910", icone: "camera", visible: false },
+    decheterie: { nom: "Déchèteries", un: "Déchèterie", couleur: "#5D8C2C", icone: "waste-basket", visible: false }
+  };
+  const TAILLE_EPINGLE = 40, epingles = new Cesium.PinBuilder();
+  const imageEpingle = async (c) => (c.icone
+    ? await epingles.fromMakiIconId(c.icone, Cesium.Color.fromCssColorString(c.couleur), TAILLE_EPINGLE)
+    : epingles.fromText(c.texte, Cesium.Color.fromCssColorString(c.couleur), TAILLE_EPINGLE)).toDataURL();
+  const imagesGroupes = new Map();
+  const imageGroupe = (c, n) => {
+    const cle = `${c.couleur}${n}`;
+    if (!imagesGroupes.has(cle)) imagesGroupes.set(cle, epingles.fromText(String(n), Cesium.Color.fromCssColorString(c.couleur), TAILLE_EPINGLE + 6).toDataURL());
+    return imagesGroupes.get(cle);
+  };
+  const auSol = { verticalOrigin: Cesium.VerticalOrigin.BOTTOM, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+    disableDepthTestDistance: Number.POSITIVE_INFINITY };
+  const chargerPoi = async () => {
+    let donnees;
+    try { donnees = await (await fetch("poi/poi.geojson")).json(); } catch (e) { console.error(e); return; }
+    const liste = document.getElementById("poi-categories");
+    for (const [cle, c] of Object.entries(CATEGORIES_POI)) {
+      const points = donnees.features.filter(f => f.properties.categorie === cle);
+      if (!points.length) continue;
+      const source = new Cesium.CustomDataSource(cle), image = await imageEpingle(c);
+      for (const f of points) {
+        const entite = source.entities.add({
+          position: Cesium.Cartesian3.fromDegrees(...f.geometry.coordinates),
+          billboard: { image, ...auSol, scaleByDistance: new Cesium.NearFarScalar(500, 1, 20000, 0.6) },
+          label: {
+            text: f.properties.nom, font: "600 13px system-ui, sans-serif", fillColor: Cesium.Color.WHITE,
+            showBackground: true, backgroundColor: Cesium.Color.fromCssColorString("rgba(32, 34, 38, 0.85)"),
+            backgroundPadding: new Cesium.Cartesian2(7, 4), pixelOffset: new Cesium.Cartesian2(0, -TAILLE_EPINGLE - 4),
+            distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 2500), ...auSol
+          }
+        });
+        entite.poi = f.properties;
+      }
+      Object.assign(source.clustering, { enabled: true, pixelRange: 36, minimumClusterSize: 3 });
+      // le groupe est placé à l'altitude 0 de l'ellipsoïde, sous le relief : jamais masqué par lui
+      source.clustering.clusterEvent.addEventListener((entites, groupe) => {
+        groupe.label.show = false;
+        Object.assign(groupe.billboard, { show: true, id: groupe.label.id, image: imageGroupe(c, entites.length),
+          verticalOrigin: Cesium.VerticalOrigin.BOTTOM, disableDepthTestDistance: Number.POSITIVE_INFINITY });
+      });
+      source.show = c.visible;
+      await viewer.dataSources.add(source);
+      const caseC = Object.assign(el("input"), { type: "checkbox", checked: c.visible });
+      caseC.addEventListener("change", () => { source.show = caseC.checked; });
+      const pastille = el("span", "couleur"); pastille.style.background = c.couleur;
+      const ligne = el("label");
+      ligne.append(caseC, pastille, el("span", null, c.nom), el("span", "compte", String(points.length)));
+      liste.append(ligne);
+    }
+  };
+  chargerPoi();
+  // « 1975/04/11 : inscrit MH ; 1998/01/26 : classé MH » → « inscrit MH le 11/04/1975, classé MH le 26/01/1998 »
+  const datesProtection = v => vide(v) ? null : String(v).split(";")
+    .map(s => s.trim().replace(/^(\d{4})\/(\d{2})\/(\d{2})\s*:\s*(.+)$/, "$4 le $3/$2/$1")).join(", ");
+  const afficherPoi = (p) => {
+    const c = CATEGORIES_POI[p.categorie];
+    if (choisi) colorer(choisi, COULEUR);
+    choisi = null;
+    const blocs = [];
+    const l = lignes([["Commune", p.commune], ["Adresse", p.adresse], ["Protection", datesProtection(p.protections)],
+      ["Époque", p.siecle], ["Statut", p.statut], ["Source", p.source]]);
+    if (l) blocs.push(l);
+    if (p.categorie === "monument" && p.id) {
+      const lien = Object.assign(el("a", null, "Notice sur la plateforme POP du ministère"),
+        { href: `https://pop.culture.gouv.fr/notice/merimee/${encodeURIComponent(p.id)}`, target: "_blank", rel: "noopener noreferrer" });
+      const para = el("p"); para.append(lien); blocs.push(para);
+    }
+    const type = p.protection ? `${c.un} ${p.protection.toLowerCase()}` : c.un;
+    afficherCarte(p.nom, [p.nom === c.un ? null : type, p.commune].filter(Boolean).join(" · "), blocs);
+  };
+  // clic sur une épingle numérotée : rapproche la vue pour séparer les épingles du groupe
+  const rapprocherGroupe = (entites) => {
+    const sphere = Cesium.BoundingSphere.fromPoints(entites.map(e => e.position.getValue(viewer.clock.currentTime)));
+    camera.flyToBoundingSphere(sphere, {
+      offset: new Cesium.HeadingPitchRange(camera.heading, Math.min(camera.pitch, deg(-35)), Math.max(sphere.radius * 2.5, 500)),
+      duration: duree(1.2)
+    });
+  };
+
   // ---------- Sélection au toucher / clic (pas d'effet au survol, comme l'IGN) ----------
   let choisi = null;
   const estBatiment = f => f instanceof Cesium.Cesium3DTileFeature;
@@ -1231,6 +1331,8 @@
   };
   const selectionner = (x, y) => {
     const f = scene.pick(new Cesium.Cartesian2(x, y));
+    if (Array.isArray(f?.id)) { fermerFiche(); rapprocherGroupe(f.id); return; }
+    if (f?.id?.poi) { afficherPoi(f.id.poi); degagerSousFeuille(x, y); return; }
     if (!estBatiment(f)) { fermerFiche(); return; }
     if (choisi && choisi !== f) colorer(choisi, COULEUR);
     choisi = f; colorer(f, COULEUR_CHOIX);
